@@ -79,6 +79,7 @@ class World{
 	}
 	add_block(block){
 		this.blocks.push(block);
+		block.world = this;
 	}
 	to_cgrid_coords(pt){
 		return [Math.trunc(pt[0]/this.cgridsize), Math.trunc(pt[1]/this.cgridsize)];
@@ -92,6 +93,7 @@ class World{
 		}
 	}
 	cdrawline(pen, x0,y0,x1,y1){
+//		if(pen < 1) console.log('huh');
 		let dx = Math.abs(x1 - x0);
 		let dy = -Math.abs(y1 - y0);
 		let sx = (x0 < x1) ? 1 : -1;
@@ -135,19 +137,19 @@ class World{
 		}
 	}
 	step(time){
-		this.steppedblocks = this.blocks.map((b) => b.createstepped(time));
 		let cgridbuf = new ArrayBuffer(this.cgridx*this.cgridy);
 		this.cgrid = new Uint8Array(cgridbuf);
 		this.collisions = {};
-		for(let idx = 0; idx < this.blocks.length; idx++){
+		this.blocks.forEach((b, idx) => {
+			b.step(time);
 			// draw on the collision map the convex hull of the current block and the stepped block
-			this.cdrawpoly(idx+1, hull(this.blocks[idx].points().concat(this.steppedblocks[idx].points())));
-		}
-		
+			this.cdrawpoly(idx+1, hull(b.points().concat(b.npoints())));
+			//this.cdrawpoly(idx*2+2, b.points());
+			//this.cdrawpoly(idx+1, b.npoints());
+		});
 	}
 	swap(){
-		this.blocks = this.steppedblocks;
-		this.steppedblocks = [];
+		this.blocks.forEach((b) => b.swap());
 	}
 	get_block_at(c){
 		for(let idx = 0; idx < this.blocks.length; idx++){
@@ -174,13 +176,12 @@ class World{
 		this.last_transform = ((t) => [t.a,t.b,t.c,t.d,t.e,t.f])(ctx.getTransform());
 		//ctx.scale(scale, scale);
 		ctx.lineJoin = "round";
-		this.blocks.forEach((b) => this.drawpoly('#000000', b.points(), ctx));
-//		this.steppedblocks.forEach((b) => this.drawpoly('#303030', b.points(), ctx));
-		//for(let idx = 0; idx < this.blocks.length; idx++){
-		//	this.drawpoly('#ff0000', hull(this.blocks[idx].points().concat(this.steppedblocks[idx].points())), ctx);
-		//}
+		this.blocks.forEach((b) => {
+			this.drawpoly('#000000', b.points(), ctx);
+		//	this.drawpoly('#303030', b.npoints(), ctx);
+			//this.drawpoly('#ff0000', hull(b.points().concat(b.npoints())), ctx);
+		});
 		// Draw Text
-		/*
 			ctx.fillStyle = '#000000';
 			ctx.font = '0.1px monospace';
 			let t = ctx.getTransform();
@@ -188,10 +189,8 @@ class World{
 			//Rotation
 			this.blocks.forEach((b) => ctx.fillText(b.vr, b.cx, world.height-b.cy));
 			ctx.setTransform(t);
-		*/
-		//
 		// Draw collision grid
-/*			ctx.fillStyle = '#0000ff50';
+			ctx.fillStyle = '#0000ff50';
 			for(let x = 0; x < this.cgridx; x++){
 				for(let y = 0; y < this.cgridy; y++){
 					if(0 != this.cgrid[x+y*this.cgridx]){
@@ -199,139 +198,102 @@ class World{
 					}
 				}
 			}
-		*/ //
+		//
 		for(let k in this.collisions){
 			let o1idx = (k & 255) - 1;
 			let o2idx = (k >> 8) - 1;
 			//console.log(o1idx, o2idx);
-			//rollback movement
 			let o1 = this.blocks[o1idx];
 			let o2 = this.blocks[o2idx];
-			let i1 = this.steppedblocks[o1idx];
-			let i2 = this.steppedblocks[o2idx];
-			if(o1 !== i1){
+			//rollback movement
+			if(!(o1.has_rollback)){
 				// haven't already rolled-back
 				o1.rollback_count += 1;
-				o1.vx = i1.vx;
-				o1.vy = i1.vy;
-				o1.vr = i1.vr;
-				this.steppedblocks[o1idx] = o1;
+				o1.has_rollback = true;
 			}
-			if(o2 !== i2){
+			if(!(o2.has_rollback)){
 				// haven't already rolled-back
 				o2.rollback_count += 1;
-				o2.vx = i2.vx;
-				o2.vy = i2.vy;
-				o2.vr = i2.vr;
-				this.steppedblocks[o2idx] = o2;
+				o2.has_rollback = true;
 			}
-			let restitution = 0.7;
+			// 1 for elastic, 0 for inelastic
+			let restitution = 0.5;
 //			if(o1.rollback_count > 1 && o2.rollback_count > 1){
 				// energy is lost once per collision, not after
 //				restitution = 1.0;
 //			}
 			let lx = (this.collisions[k][0]+0.5)*this.cgridsize;
 			let ly = (this.collisions[k][1]+0.5)*this.cgridsize;
-			ctx.strokeStyle = '#00ff00';
-			ctx.beginPath();
-			ctx.arc(lx,ly, 0.05, 0, 2*Math.PI);
-			ctx.stroke();
-			// 1 for elastic, 0 for inelastic
-			let s1 = o1.get_point_status(lx,ly);
-			let s2 = o2.get_point_status(lx,ly);
+			let s1 = o1.get_point_speed(lx,ly);
+			let s2 = o2.get_point_speed(lx,ly);
 			let vdelta = [s2[0]-s1[0],s2[1]-s1[1]];
 			if(vdelta[0] == 0 && vdelta[1] == 0){
 				//console.log('not moving',s1,s2);
 				continue;
 			}
 			let impulse_dir = norm(vdelta);
+//			console.log('points into block:',o1.surface_vec_points_in([lx,ly], impulse_dir), !o2.surface_vec_points_in([lx, ly], impulse_dir));
+			let o1pointsinside = o1.surface_vec_points_in([lx,ly], impulse_dir);
+			let o2pointsinside = !o2.surface_vec_points_in([lx,ly], impulse_dir);
+			if(!o1pointsinside || !o2pointsinside){
+//				if(o1idx > 3 && o2idx > 3){
+					// don't debug collisions with walls
+					if(o1pointsinside || o2pointsinside){
+//						console.log("points-inside disagreement");
+					}else{
+						ctx.strokeStyle = '#ff0000';
+						ctx.beginPath();
+						ctx.moveTo(lx, ly);
+						ctx.lineTo(lx+impulse_dir[0]*0.5, ly+impulse_dir[1]*0.5);
+						ctx.stroke();
+//						console.log("points-outside collision");
+						continue;
+					}
+//				}
+				// These people are actually already trying to avoid each other
+			}
 			let m1 = o1.get_effective_mass(lx,ly,impulse_dir);
 			let m2 = o2.get_effective_mass(lx,ly,impulse_dir);
+//			let m1 = o1.get_effective_mass(lx,ly,norm(s1));
+//			let m2 = o2.get_effective_mass(lx,ly,norm(s2));
+//			let mom1 = o1.get_point_momentum(lx, ly);
+//			let mom2 = o2.get_point_momentum(lx, ly);
+//			let effmass1 = Math.sqrt(mom1[0]*mom1[0]+mom1[1]*mom1[1])/Math.sqrt(s1[0]*s1[0]+s1[1]*s1[1]);
+//			let effmass2 = Math.sqrt(mom2[0]*mom2[0]+mom2[1]*mom2[1])/Math.sqrt(s2[0]*s2[0]+s2[1]*s2[1]);
+
 			let vdeltamag = Math.sqrt(vdelta[0]*vdelta[0]+vdelta[1]*vdelta[1]);
 			//https://en.wikipedia.org/wiki/Inelastic_collision
 			let impulse_mag = (m1*m2)/(m1+m2)*(1+restitution)*vdeltamag;
+		//	let mom = [mom2[0]-mom1[0], mom2[1]-mom1[1]];
+		//	mom[0] *= 1+restitution;
+		//	mom[1] *= 1+restitution;
+		//	impulse_dir = norm(mom);
+		//	let impulse_mag = Math.sqrt(mom[0]*mom[0]+mom[1]*mom[1]);
 			//console.log("impulse mag:",impulse_mag);
-			o1.apply_impulse([lx,ly], impulse_dir, impulse_mag);
-			o2.apply_impulse([lx,ly], impulse_dir, -impulse_mag);
-			ctx.strokeStyle = '#00ff00';
-			ctx.beginPath();
-			ctx.moveTo(lx,ly);
-			ctx.lineTo(lx+impulse_dir[0]*impulse_mag, ly+impulse_dir[1]*impulse_mag);
-			ctx.stroke();
-			ctx.strokeStyle = '#000000';
-			ctx.beginPath();
-			ctx.moveTo(lx+s1[0], ly+s1[1]);
-			ctx.lineTo(lx, ly);
-			ctx.lineTo(lx+s2[0], ly+s2[1]);
-			ctx.stroke();
+			//console.log("impulse info:",[lx,ly], impulse_dir, impulse_mag);
+			o1.apply_impulse([lx,ly], impulse_dir, impulse_mag, ctx);
+			o2.apply_impulse([lx,ly], impulse_dir, -impulse_mag, ctx);
+			//ctx.strokeStyle = '#00ff00';
+			//ctx.beginPath();
+			//ctx.moveTo(lx,ly);
+			//ctx.lineTo(lx+impulse_dir[0]*impulse_mag, ly+impulse_dir[1]*impulse_mag);
+			//ctx.stroke();
+			//ctx.strokeStyle = '#000000';
+			//ctx.beginPath();
+			//ctx.moveTo(lx+s1[0], ly+s1[1]);
+			//ctx.lineTo(lx, ly);
+			//ctx.lineTo(lx+s2[0], ly+s2[1]);
+			//ctx.stroke();
 		}
-		let momentum_cluster_rollback_targets = [];
+		let rollback_max = 30;
 		for(let oidx = 0; oidx < this.blocks.length; oidx++){
 			let o = this.blocks[oidx];
-			let rollback_max = 30;
-/*			if(o.rollback_strategy == 0){
-				if(o.rollback_count > rollback_max/2){
-					o.rollback_strategy += 1;
-					o.rollback_count = 0;
-					//form sets of chronic rollback blocks.
-					//remove all rotation, and distribute linear momentum only to give them all the same linear velocity, and reset their rollback counter
-					momentum_cluster_rollback_targets.push(oidx);
-				}
-			}else{*/
-				if(o.rollback_count > rollback_max+o.rollback_strategy*5){
-					o.rollback_count = 0;
-					//subsequent rollbacks remove all velocity
-					//console.log('stopped rollback items');
-					o.vx = 0;
-					o.vy = 0;
-					o.vr = 0;
-					o.rollback_strategy = (o.rollback_strategy+1)%6;
-				}
-//			}
-		}
-		while(momentum_cluster_rollback_targets.length > 0){
-			// build momentum clusters
-			let t = momentum_cluster_rollback_targets.pop();
-			let mc = [t];
-			for(let k in this.collisions){
-				let o1idx = (k & 255) - 1;
-				let o2idx = (k >> 8) - 1;
-				if(o1idx == t){
-					// this should be made more efficient by sorting m_c_r_t and doing a single binary search, instead of a linear search
-					let mcrtidx = momentum_cluster_rollback_targets.indexOf(o2idx);
-					if(mcrtidx != -1){
-						// Item exists
-						momentum_cluster_rollback_targets.splice(mcrtidx, 1);
-					}
-					mc.push(o2idx);
-				}else if(o2idx == t){
-					// this should be made more efficient by sorting m_c_r_t and doing a single binary search, instead of a linear search
-					let mcrtidx = momentum_cluster_rollback_targets.indexOf(o1idx);
-					if(mcrtidx != -1){
-						// Item exists
-						momentum_cluster_rollback_targets.splice(mcrtidx, 1);
-					}
-					mc.push(o1idx);
-				}
-			}
-			// momentum sums
-			let sum_mx = 0;
-			let sum_my = 0;
-			// mass sum
-			let sum_mass = 0;
-			// convert from a list of indexes to a list of blocks
-			mc = mc.map((idx) => this.blocks[idx]);
-			for(let b in mc){
-				sum_mass += b.mass;
-				sum_mx += b.vx*b.mass;
-				sum_my += b.vy*b.mass;
-			}
-			let svx = sum_mx/sum_mass;
-			let svy = sum_my/sum_mass;
-			for(let b in mc){
-				mc.vx = svx;
-				mc.vy = svy;
-				//mc.vr = 0;
+			if(o.rollback_count > rollback_max){
+				o.rollback_count = 0;
+				//rollbacks remove all velocity
+				o.vx = 0;
+				o.vy = 0;
+				o.vr = 0;
 			}
 		}
 	}
@@ -356,13 +318,29 @@ class Block{
 		this.cx = cx;
 		this.cy = cy;
 		this.rot = rot;
+		this.ncx = cx;
+		this.ncy = cy;
+		this.nrot = rot;
 		this.vx = vx;
 		this.vy = vy;
 		this.vr = vr;
 		this.i_moment = (this.imoment_filled()+this.imoment_hollow())/2;
 		this.gravity = gravity;
 		this.rollback_count = 0;
-		this.rollback_strategy = 0;
+		this.has_rollback = false;
+		this.world = null;
+	}
+	swap(){
+		if(!(this.has_rollback)){
+			// not rolled back
+			this.cx = this.ncx;
+			this.cy = this.ncy;
+			this.rot = this.nrot;
+			this.rollback_count = 0;
+		}else{
+			// rolled back
+			this.has_rollback = false;
+		}
 	}
 	imoment_filled(){
 		// Mass evenly distributed inside area
@@ -372,24 +350,40 @@ class Block{
 		// Mass concentrated at shell
 		return this.mass*(this.width*this.width+this.height*this.height)/3;
 	}
-	createstepped(time){
-		let nrot = this.rot+this.vr*time;
-		while(nrot >= 2*Math.PI) nrot -= 2*Math.PI;
-		while(nrot < 0) nrot += 2*Math.PI;
-		let nvy = this.vy-this.gravity*time;
-		return new Block(this.width, this.height, this.mass, this.cx+this.vx*time, this.cy+this.vy*time, nrot, this.vx, nvy, this.vr, this.gravity);
+	step(time){
+		this.nrot = this.rot+this.vr*time;
+		while(this.nrot >= 2*Math.PI) this.nrot -= 2*Math.PI;
+		while(this.nrot < 0) this.nrot += 2*Math.PI;
+		//limit speeds
+		let speed = Math.sqrt(this.vx*this.vx+this.vy*this.vy);
+		if(speed > 2400){
+			this.vx *= 2400/speed;
+			this.vy *= 2400/speed;
+		}
+		if(Math.abs(this.vr) > 30*Math.PI){
+			this.vr *= 30*Math.PI/this.vr;
+		}
+		this.vy -= this.gravity*time;
+		this.ncx = this.cx+this.vx*time;
+		this.ncy = this.cy+this.vy*time;
+		// this drag formula is not accurate at all, TODO
+		this.vx *= (1-0.1*time);
+		this.vy *= (1-0.1*time);
+		this.vr *= (1-0.1*time);
 	}
 	get_effective_mass(x,y,dir){
-//		return this.mass;
+		return this.mass;
 		let loc = [x-this.cx, y-this.cy];
 		let lnorm = norm(loc);
-		let linear = 1-Math.abs(lnorm[0]*dir[1] - lnorm[1]*dir[0]);
+		// i_moment = angular_momentum / angular_velocity
+//		let linear = 1-Math.abs(lnorm[0]*dir[1] - lnorm[1]*dir[0]);
 		let offset = (loc[0]*dir[1] - loc[1]*dir[0]);
+		//let offset = Math.sqrt(loc[0]*loc[0]+loc[1]*loc[1]);
 		// effective rotational mass at this point
-		let rmass = this.i_moment/Math.abs(offset);
-//		let rmass = this.i_moment;
-		if(linear < 0.5) linear = 0.5;
-		return linear*this.mass + (1-linear)*rmass;
+		let rmass = this.i_moment/(offset*offset);
+		let linear = rmass/(this.mass+rmass);
+		console.log('linear:',linear);
+		return this.mass*linear + rmass*(1-linear);
 	}
 	contains_point(x, y){
 		x -= this.cx;
@@ -404,7 +398,54 @@ class Block{
 			return false;
 		}
 	}
-	get_point_status(x, y){
+	surface_vec_points_in(l, v){
+		l = [l[0] - this.cx, l[1] - this.cy];
+		// unrotate point and vec
+		let rot = -this.rot;
+		let xr = l[0]*Math.cos(rot) - l[1]*Math.sin(rot);
+		let yr = l[0]*Math.sin(rot) + l[1]*Math.cos(rot);
+		let vx = v[0]*Math.cos(rot) - v[1]*Math.sin(rot);
+		let vy = v[0]*Math.sin(rot) + v[1]*Math.cos(rot);
+		// scale point and vec to 'squarify' the scenario
+//		let aspect = this.width/this.height;
+//		yr *= aspect;
+//		vy *= aspect;
+		if(xr < 0){
+			xr *= -1;
+			vx *= -1;
+		}
+		if(yr < 0){
+			yr *= -1;
+			vy *= -1;
+		}
+		let vec = null;
+		if(xr >= this.width/2-this.world.cgridsize/2 && yr >= this.height/2-this.world.cgridsize/2){
+			return vx < 0 || vy < 0;
+		}else if(xr/this.width > yr/this.height){
+			// we are on the high-x wall. Use the x vector
+			return vx < 0;
+		}else{
+			// we are on the high-y wall. Use the y vector
+			return vy < 0;
+		}
+	}
+/*	get_point_momentum(x, y){
+		//relative
+		let rx = x-this.cx;
+		let ry = y-this.cy;
+		let dist2 = rx*rx+ry*ry;
+		let dist = Math.sqrt(dist2);
+		let vx = this.vx*this.mass;
+		let vy = this.vy*this.mass;
+		if(dist != 0){
+			let vr = this.vr*this.i_moment;
+			vx += (-ry/dist)*vr;
+			vy += (rx/dist)*vr;
+		}
+		//determine the radial and linear components of vx and vy to determine the proportion of rmass vs mass
+		return [vx,vy];
+	}*/
+	get_point_speed(x, y){
 		//relative
 		let rx = x-this.cx;
 		let ry = y-this.cy;
@@ -416,7 +457,7 @@ class Block{
 		//determine the radial and linear components of vx and vy to determine the proportion of rmass vs mass
 		return [vx,vy];
 	}
-	drag_to(internal_loc, worldloc, time){
+	drag_to(internal_loc, worldloc, time, ctx){
 		let x = internal_loc[0];
 		let y = internal_loc[1];
 		let rot = this.rot;
@@ -424,26 +465,78 @@ class Block{
 		let yr = x*Math.sin(rot) + y*Math.cos(rot);
 		xr += this.cx;
 		yr += this.cy;
-		console.log(xr, yr);
+		let current_v = this.get_point_speed(xr, yr);
 		let dx = worldloc[0] - xr;
 		let dy = worldloc[1] - yr;
+		dx = dx*time*this.mass*100;
+		dy = dy*time*this.mass*100;
+//		dx = (dx-current_v[0])*time*this.mass*100;
+//		dy = (dy-current_v[1])*time*this.mass*100;
 		let dist = Math.sqrt(dx*dx+dy*dy);
 		if(dist == 0) return;
-		console.log('dragging, dist:', dist, dx, dy);
+//		console.log('dragging, dist:', dist, dx, dy);
 		let dir = [dx/dist, dy/dist];
-		let mag = this.mass*dist;
-		this.apply_impulse([dx,dy], dir, mag);
+		let mag = dist;
+		this.apply_impulse([xr, yr], dir, mag, ctx);
 	}
-	apply_impulse(loc, dir, mag){
-		loc = [loc[0]-this.cx, loc[1]-this.cy];
+	apply_impulse(aloc, dir, mag, ctx=null){
+		let loc = [aloc[0]-this.cx, aloc[1]-this.cy];
 		let normloc = norm(loc);
-		let linear = 1-Math.abs(normloc[0]*dir[1] - normloc[1]*dir[0]);
-		if(linear < 0.5) linear = 0.5;
-		this.vx += mag/this.mass*linear*dir[0];
-		this.vy += mag/this.mass*linear*dir[1];
-		let offset = (loc[0]*dir[1] - loc[1]*dir[0]);
-		let dr1 = mag*offset/this.i_moment*(1-linear);
-		this.vr += dr1;
+		let purely_linear_component = normloc[0]*dir[0] + normloc[1]*dir[1];
+		let dvx = mag*purely_linear_component/this.mass * normloc[0];
+		let dvy = mag*purely_linear_component/this.mass * normloc[1];
+		ctx.strokeStyle = '#0000ff';
+		ctx.beginPath();
+		ctx.moveTo(aloc[0], aloc[1]);
+		ctx.lineTo(aloc[0]+dvx*2, aloc[1]+dvy*2);
+		ctx.stroke();
+		this.vx += dvx;
+		this.vy += dvy;
+		let mixed_vecx = dir[0] - purely_linear_component*normloc[0];
+		let mixed_vecy = dir[1] - purely_linear_component*normloc[1];
+		ctx.strokeStyle = '#ff00ff';
+		ctx.beginPath();
+		ctx.moveTo(aloc[0], aloc[1]);
+		ctx.lineTo(aloc[0]+mixed_vecx*2, aloc[1]+mixed_vecy*2);
+		ctx.stroke();
+		// this can be done without a square root, using cross product
+		let offset2 = (loc[0]*mixed_vecy - loc[1]*mixed_vecx);
+		let offset = Math.sqrt(loc[0]*loc[0]+loc[1]*loc[1]);
+//		console.log('2 offsets should be same',offset, offset2);
+		let rmass = this.i_moment/(offset*offset);
+		let mixed_linear = rmass / (rmass+this.mass);
+		let dr = mag*Math.sqrt(mixed_vecx*mixed_vecx+mixed_vecy*mixed_vecy)*(1-mixed_linear)/rmass;
+		if(offset2 < 0){
+			this.vr -= dr;
+		}else{
+			this.vr += dr;
+		}
+		this.vx += mag*mixed_vecx*mixed_linear/this.mass;
+		this.vy += mag*mixed_vecy*mixed_linear/this.mass;
+		return;
+		//let total_mass = this.get_effective_mass(loc[0], loc[1], dir);
+		//let rmass = total_mass - this.mass;
+		
+//		let rmass = this.i_moment/(offset*offset);
+		let linear = rmass/(this.mass+rmass);
+		this.vx += mag*linear/this.mass * dir[0];
+		this.vy += mag*linear/this.mass * dir[1];
+		let dr1 = mag*(1-linear)/rmass;
+		if(offset < 0){
+			this.vr -= dr1;
+		}else{
+			this.vr += dr1;
+		}
+		if(ctx != null){
+			ctx.strokeStyle = '#00ff00';
+			ctx.beginPath();
+			ctx.arc(aloc[0], aloc[1], 0.05, 0, 2*Math.PI);
+			ctx.stroke();
+			ctx.beginPath();
+			ctx.moveTo(aloc[0], aloc[1]);
+			ctx.lineTo(aloc[0]+dir[0]*mag*2, aloc[1]+dir[1]*mag*2);
+			ctx.stroke();
+		}
 	}
 	points(){
 		let rot = this.rot;
@@ -451,6 +544,23 @@ class Block{
 		let height = this.height;
 		let cx = this.cx;
 		let cy = this.cy;
+		let o1x = width/2*Math.cos(rot) - height/2*Math.sin(rot);
+		let o1y = width/2*Math.sin(rot) + height/2*Math.cos(rot);
+		let o2x = width/2*Math.cos(rot) + height/2*Math.sin(rot);
+		let o2y = width/2*Math.sin(rot) - height/2*Math.cos(rot);
+		return [
+			[cx+o1x, cy+o1y],
+			[cx+o2x, cy+o2y],
+			[cx-o1x, cy-o1y],
+			[cx-o2x, cy-o2y],
+		];
+	}
+	npoints(){
+		let rot = this.nrot;
+		let width = this.width;
+		let height = this.height;
+		let cx = this.ncx;
+		let cy = this.ncy;
 		let o1x = width/2*Math.cos(rot) - height/2*Math.sin(rot);
 		let o1y = width/2*Math.sin(rot) + height/2*Math.cos(rot);
 		let o2x = width/2*Math.cos(rot) + height/2*Math.sin(rot);
