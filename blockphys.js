@@ -93,7 +93,6 @@ class World{
 		}
 	}
 	cdrawline(pen, x0,y0,x1,y1){
-//		if(pen < 1) console.log('huh');
 		let dx = Math.abs(x1 - x0);
 		let dy = -Math.abs(y1 - y0);
 		let sx = (x0 < x1) ? 1 : -1;
@@ -123,16 +122,46 @@ class World{
 	}
 	cdrawpoint(pen, x,y){
 		if(x < 0 || y < 0 || x >= this.cgridx || y >= this.cgridy) return;
+		let rollmeback = (1 == (1&pen));
+		let myidx = (pen >> 1)-1;
 		let c = x+y*this.cgridx;
 		let v = this.cgrid[c];
 		if(v == 0){
 			this.cgrid[c] = pen;
 		}else{
-			if(v == pen) return;
-			if(v < pen){
-				this.collisions[((v << 8) | pen)] = [x,y];
+			let otheridx = (v >> 1)-1;
+			let rollotherback = (1 == (1&v));
+			if(rollmeback && !rollotherback){
+				// promote as rollback
+				this.cgrid[c] = pen;
+			}
+			if(otheridx == myidx){
+				// this is the same object
+				return;
+			}
+			if(!(rollmeback || rollotherback)){
+				// we are different, but neither person has to rollback
+				return;
+			}
+			let cid = null;
+			let rollfirstback = null;
+			let rollsecondback = null;
+			if(otheridx < myidx){
+				cid = (otheridx << 8) | myidx;
+				rollfirstback = rollotherback;
+				rollsecondback = rollmeback;
 			}else{
-				this.collisions[((pen << 8) | v)] = [x,y];
+				cid = (myidx << 8) | otheridx;
+				rollfirstback = rollmeback;
+				rollsecondback = rollotherback;
+			}
+			if(cid in this.collisions){
+				let coll = this.collisions[cid];
+				// attempt to promote rollback status
+				coll[2] = coll[2] || rollfirstback;
+				coll[3] = coll[3] || rollsecondback;
+			}else{
+				this.collisions[cid] = [x,y,rollfirstback,rollsecondback];
 			}
 		}
 	}
@@ -143,8 +172,14 @@ class World{
 		this.blocks.forEach((b, idx) => {
 			b.step(time);
 			// draw on the collision map the convex hull of the current block and the stepped block
-			this.cdrawpoly(idx+1, hull(b.points().concat(b.npoints())));
-			//this.cdrawpoly(idx*2+2, b.points());
+			// The hull causes other people to rollback, but not me.
+			this.cdrawpoly(idx*2+2, hull(b.points().concat(b.npoints())));
+			// The new position (which is inside the hull) causes me to rollback, but not (necessarily) other people.
+			this.cdrawpoly(idx*2+3, b.npoints());
+			// The anti-tunnel tail follows the same rules as the new position
+			let p1 = this.to_cgrid_coords([b.cx,b.cy]);
+			let p2 = this.to_cgrid_coords([b.ncx,b.ncy]);
+			this.cdrawline(idx*2+3, p1[0],p1[1],p2[0],p2[1]);
 			//this.cdrawpoly(idx+1, b.npoints());
 		});
 	}
@@ -182,7 +217,7 @@ class World{
 			//this.drawpoly('#ff0000', hull(b.points().concat(b.npoints())), ctx);
 		});
 		// Draw Text
-			ctx.fillStyle = '#000000';
+/*			ctx.fillStyle = '#000000';
 			ctx.font = '0.1px monospace';
 			let t = ctx.getTransform();
 			ctx.transform(1, 0, 0, -1, 0, world.height);
@@ -198,32 +233,36 @@ class World{
 					}
 				}
 			}
-		//
+*/		//
 		for(let k in this.collisions){
-			let o1idx = (k & 255) - 1;
-			let o2idx = (k >> 8) - 1;
-			//console.log(o1idx, o2idx);
+			let o1idx = k & 255;
+			let o2idx = k >> 8;
 			let o1 = this.blocks[o1idx];
 			let o2 = this.blocks[o2idx];
+			let coll = this.collisions[k];
+			let lx = (coll[0]+0.5)*this.cgridsize;
+			let ly = (coll[1]+0.5)*this.cgridsize;
+			let rollback1 = coll[3];
+			let rollback2 = coll[2];
+//			console.log('collisioninfo ids:', o1idx+'('+rollback1+')', o2idx+'('+rollback2+')', 'location: ('+lx+','+ly+')');
+			
 			//rollback movement
-			if(!(o1.has_rollback)){
+			if(rollback1 && !(o1.has_rollback)){
 				// haven't already rolled-back
 				o1.rollback_count += 1;
 				o1.has_rollback = true;
 			}
-			if(!(o2.has_rollback)){
+			if(rollback2 && !(o2.has_rollback)){
 				// haven't already rolled-back
 				o2.rollback_count += 1;
 				o2.has_rollback = true;
 			}
 			// 1 for elastic, 0 for inelastic
-			let restitution = 0.5;
+			let restitution = 0.65;
 //			if(o1.rollback_count > 1 && o2.rollback_count > 1){
 				// energy is lost once per collision, not after
 //				restitution = 1.0;
 //			}
-			let lx = (this.collisions[k][0]+0.5)*this.cgridsize;
-			let ly = (this.collisions[k][1]+0.5)*this.cgridsize;
 			let s1 = o1.get_point_speed(lx,ly);
 			let s2 = o2.get_point_speed(lx,ly);
 			let vdelta = [s2[0]-s1[0],s2[1]-s1[1]];
@@ -246,8 +285,8 @@ class World{
 						ctx.moveTo(lx, ly);
 						ctx.lineTo(lx+impulse_dir[0]*0.5, ly+impulse_dir[1]*0.5);
 						ctx.stroke();
-//						console.log("points-outside collision");
 						continue;
+//						console.log("points-outside collision");
 					}
 //				}
 				// These people are actually already trying to avoid each other
@@ -351,9 +390,6 @@ class Block{
 		return this.mass*(this.width*this.width+this.height*this.height)/3;
 	}
 	step(time){
-		this.nrot = this.rot+this.vr*time;
-		while(this.nrot >= 2*Math.PI) this.nrot -= 2*Math.PI;
-		while(this.nrot < 0) this.nrot += 2*Math.PI;
 		//limit speeds
 		let speed = Math.sqrt(this.vx*this.vx+this.vy*this.vy);
 		if(speed > 2400){
@@ -363,6 +399,9 @@ class Block{
 		if(Math.abs(this.vr) > 30*Math.PI){
 			this.vr *= 30*Math.PI/this.vr;
 		}
+		this.nrot = this.rot+this.vr*time;
+		while(this.nrot >= 2*Math.PI) this.nrot -= 2*Math.PI;
+		while(this.nrot < 0) this.nrot += 2*Math.PI;
 		this.vy -= this.gravity*time;
 		this.ncx = this.cx+this.vx*time;
 		this.ncy = this.cy+this.vy*time;
@@ -485,25 +524,25 @@ class Block{
 		let purely_linear_component = normloc[0]*dir[0] + normloc[1]*dir[1];
 		let dvx = mag*purely_linear_component/this.mass * normloc[0];
 		let dvy = mag*purely_linear_component/this.mass * normloc[1];
-		ctx.strokeStyle = '#0000ff';
+/*		ctx.strokeStyle = '#0000ff';
 		ctx.beginPath();
 		ctx.moveTo(aloc[0], aloc[1]);
 		ctx.lineTo(aloc[0]+dvx*2, aloc[1]+dvy*2);
-		ctx.stroke();
+		ctx.stroke();*/
 		this.vx += dvx;
 		this.vy += dvy;
 		let mixed_vecx = dir[0] - purely_linear_component*normloc[0];
 		let mixed_vecy = dir[1] - purely_linear_component*normloc[1];
-		ctx.strokeStyle = '#ff00ff';
+/*		ctx.strokeStyle = '#ff00ff';
 		ctx.beginPath();
 		ctx.moveTo(aloc[0], aloc[1]);
 		ctx.lineTo(aloc[0]+mixed_vecx*2, aloc[1]+mixed_vecy*2);
-		ctx.stroke();
+		ctx.stroke();*/
 		// this can be done without a square root, using cross product
 		let offset2 = (loc[0]*mixed_vecy - loc[1]*mixed_vecx);
 		let offset = Math.sqrt(loc[0]*loc[0]+loc[1]*loc[1]);
 //		console.log('2 offsets should be same',offset, offset2);
-		let rmass = this.i_moment/(offset*offset);
+		let rmass = this.i_moment/(offset);
 		let mixed_linear = rmass / (rmass+this.mass);
 		let dr = mag*Math.sqrt(mixed_vecx*mixed_vecx+mixed_vecy*mixed_vecy)*(1-mixed_linear)/rmass;
 		if(offset2 < 0){
@@ -527,7 +566,7 @@ class Block{
 		}else{
 			this.vr += dr1;
 		}
-		if(ctx != null){
+		/*if(ctx != null){
 			ctx.strokeStyle = '#00ff00';
 			ctx.beginPath();
 			ctx.arc(aloc[0], aloc[1], 0.05, 0, 2*Math.PI);
@@ -536,7 +575,7 @@ class Block{
 			ctx.moveTo(aloc[0], aloc[1]);
 			ctx.lineTo(aloc[0]+dir[0]*mag*2, aloc[1]+dir[1]*mag*2);
 			ctx.stroke();
-		}
+		}*/
 	}
 	points(){
 		let rot = this.rot;
