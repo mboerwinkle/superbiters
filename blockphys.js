@@ -75,7 +75,7 @@ class World{
 		this.collisions = [];
 		this.blocks = [];
 		this.steppedblocks = [];
-		this.last_transform = [1,0,0,1,0,0];
+		this.fixedpoints = [];
 	}
 	add_block(block){
 		this.blocks.push(block);
@@ -129,6 +129,13 @@ class World{
 		if(v == 0){
 			this.cgrid[c] = pen;
 		}else{
+			if(v == 1){
+				let cid = (255 << 8) | myidx;
+				if(rollmeback && !(cid in this.collisions)){
+					this.collisions[cid] = [x,y,false,true];
+				}
+				return;
+			}
 			let otheridx = (v >> 1)-1;
 			let rollotherback = (1 == (1&v));
 			if(rollmeback && !rollotherback){
@@ -168,6 +175,7 @@ class World{
 	step(time){
 		let cgridbuf = new ArrayBuffer(this.cgridx*this.cgridy);
 		this.cgrid = new Uint8Array(cgridbuf);
+		this.fixedpoints.forEach((p) => this.cgrid[p] = 1);
 		this.collisions = {};
 		this.blocks.forEach((b, idx) => {
 			b.step(time);
@@ -175,11 +183,12 @@ class World{
 			// The hull causes other people to rollback, but not me.
 			this.cdrawpoly(idx*2+2, hull(b.points().concat(b.npoints())));
 			// The new position (which is inside the hull) causes me to rollback, but not (necessarily) other people.
-			this.cdrawpoly(idx*2+3, b.npoints());
 			// The anti-tunnel tail follows the same rules as the new position
+			// We draw the anti-tunnel tail first to hopefully get an accurate 'first collision' point (especially for small, fast, objects).
 			let p1 = this.to_cgrid_coords([b.cx,b.cy]);
 			let p2 = this.to_cgrid_coords([b.ncx,b.ncy]);
 			this.cdrawline(idx*2+3, p1[0],p1[1],p2[0],p2[1]);
+			this.cdrawpoly(idx*2+3, b.npoints());
 			//this.cdrawpoly(idx+1, b.npoints());
 		});
 	}
@@ -195,20 +204,12 @@ class World{
 		}
 		return null;
 	}
-	canvas_to_game_coords(c){
-		let m = invert_affine(this.last_transform);
-		let x = c[0];
-		let y = c[1];
-		return [x*m[0]+y*m[2]+m[4], x*m[1]+y*m[3]+m[5]];
-	}
 	// meters*scale = pixel
 	draw(ctx, scale){
-		ctx.lineWidth = 1/scale; // approx 1 px
-		ctx.resetTransform();
-		ctx.fillStyle = '#FFFFFF';
-		ctx.fillRect(0,0,ctx.canvas.width,ctx.canvas.height);
-		ctx.transform(scale,0,0,-scale,0,ctx.canvas.height);
-		this.last_transform = ((t) => [t.a,t.b,t.c,t.d,t.e,t.f])(ctx.getTransform());
+		ctx.lineWidth = 1/16; // approx 1 px
+//		ctx.fillStyle = '#FFFFFF';
+//		ctx.fillRect(0,0,ctx.canvas.width,ctx.canvas.height);
+//		ctx.transform(scale,0,0,-scale,0,ctx.canvas.height);
 		//ctx.scale(scale, scale);
 		ctx.lineJoin = "round";
 		this.blocks.forEach((b) => {
@@ -258,13 +259,18 @@ class World{
 				o2.has_rollback = true;
 			}
 			// 1 for elastic, 0 for inelastic
-			let restitution = 0.65;
+			let restitution = 0.5;
 //			if(o1.rollback_count > 1 && o2.rollback_count > 1){
 				// energy is lost once per collision, not after
 //				restitution = 1.0;
 //			}
 			let s1 = o1.get_point_speed(lx,ly);
-			let s2 = o2.get_point_speed(lx,ly);
+			let s2 = null;
+			if(o2idx == 255){
+				s2 = [0,0];
+			}else{
+				s2 = o2.get_point_speed(lx,ly);
+			}
 			let vdelta = [s2[0]-s1[0],s2[1]-s1[1]];
 			if(vdelta[0] == 0 && vdelta[1] == 0){
 				//console.log('not moving',s1,s2);
@@ -273,7 +279,10 @@ class World{
 			let impulse_dir = norm(vdelta);
 //			console.log('points into block:',o1.surface_vec_points_in([lx,ly], impulse_dir), !o2.surface_vec_points_in([lx, ly], impulse_dir));
 			let o1pointsinside = o1.surface_vec_points_in([lx,ly], impulse_dir);
-			let o2pointsinside = !o2.surface_vec_points_in([lx,ly], impulse_dir);
+			let o2pointsinside = false;
+			if(o2idx != 255){
+				o2pointsinside = !o2.surface_vec_points_in([lx,ly], impulse_dir);
+			}
 			if(!o1pointsinside || !o2pointsinside){
 //				if(o1idx > 3 && o2idx > 3){
 					// don't debug collisions with walls
@@ -291,38 +300,17 @@ class World{
 //				}
 				// These people are actually already trying to avoid each other
 			}
-			let m1 = o1.get_effective_mass(lx,ly,impulse_dir);
-			let m2 = o2.get_effective_mass(lx,ly,impulse_dir);
-//			let m1 = o1.get_effective_mass(lx,ly,norm(s1));
-//			let m2 = o2.get_effective_mass(lx,ly,norm(s2));
-//			let mom1 = o1.get_point_momentum(lx, ly);
-//			let mom2 = o2.get_point_momentum(lx, ly);
-//			let effmass1 = Math.sqrt(mom1[0]*mom1[0]+mom1[1]*mom1[1])/Math.sqrt(s1[0]*s1[0]+s1[1]*s1[1]);
-//			let effmass2 = Math.sqrt(mom2[0]*mom2[0]+mom2[1]*mom2[1])/Math.sqrt(s2[0]*s2[0]+s2[1]*s2[1]);
-
 			let vdeltamag = Math.sqrt(vdelta[0]*vdelta[0]+vdelta[1]*vdelta[1]);
-			//https://en.wikipedia.org/wiki/Inelastic_collision
-			let impulse_mag = (m1*m2)/(m1+m2)*(1+restitution)*vdeltamag;
-		//	let mom = [mom2[0]-mom1[0], mom2[1]-mom1[1]];
-		//	mom[0] *= 1+restitution;
-		//	mom[1] *= 1+restitution;
-		//	impulse_dir = norm(mom);
-		//	let impulse_mag = Math.sqrt(mom[0]*mom[0]+mom[1]*mom[1]);
-			//console.log("impulse mag:",impulse_mag);
-			//console.log("impulse info:",[lx,ly], impulse_dir, impulse_mag);
-			o1.apply_impulse([lx,ly], impulse_dir, impulse_mag, ctx);
-			o2.apply_impulse([lx,ly], impulse_dir, -impulse_mag, ctx);
-			//ctx.strokeStyle = '#00ff00';
-			//ctx.beginPath();
-			//ctx.moveTo(lx,ly);
-			//ctx.lineTo(lx+impulse_dir[0]*impulse_mag, ly+impulse_dir[1]*impulse_mag);
-			//ctx.stroke();
-			//ctx.strokeStyle = '#000000';
-			//ctx.beginPath();
-			//ctx.moveTo(lx+s1[0], ly+s1[1]);
-			//ctx.lineTo(lx, ly);
-			//ctx.lineTo(lx+s2[0], ly+s2[1]);
-			//ctx.stroke();
+			let m1 = o1.get_effective_mass(lx,ly,impulse_dir);
+			if(o2idx == 255){
+				o1.apply_impulse([lx,ly], impulse_dir, m1*(1+restitution)*vdeltamag, ctx);
+			}else{
+				let m2 = o2.get_effective_mass(lx,ly,impulse_dir);
+				//https://en.wikipedia.org/wiki/Inelastic_collision
+				let impulse_mag = (m1*m2)/(m1+m2)*(1+restitution)*vdeltamag;
+				o1.apply_impulse([lx,ly], impulse_dir, impulse_mag, ctx);
+				o2.apply_impulse([lx,ly], impulse_dir, -impulse_mag, ctx);
+			}
 		}
 		let rollback_max = 30;
 		for(let oidx = 0; oidx < this.blocks.length; oidx++){
@@ -348,7 +336,7 @@ class World{
 	}
 }
 class Block{
-	constructor(width, height, mass, cx, cy, rot, vx, vy, vr, gravity = 0){
+	constructor(width, height, mass, i_moment, cx, cy, rot, vx, vy, vr, gravity = 0){
 		this.width = width;
 		this.height = height;
 		this.radius2 = Math.pow(width/2, 2)+Math.pow(height/2, 2);
@@ -363,7 +351,7 @@ class Block{
 		this.vx = vx;
 		this.vy = vy;
 		this.vr = vr;
-		this.i_moment = (this.imoment_filled()+this.imoment_hollow())/2;
+		this.i_moment = i_moment;
 		this.gravity = gravity;
 		this.rollback_count = 0;
 		this.has_rollback = false;
@@ -409,20 +397,6 @@ class Block{
 		this.vx *= (1-0.1*time);
 		this.vy *= (1-0.1*time);
 		this.vr *= (1-0.1*time);
-	}
-	get_effective_mass(x,y,dir){
-		return this.mass;
-		let loc = [x-this.cx, y-this.cy];
-		let lnorm = norm(loc);
-		// i_moment = angular_momentum / angular_velocity
-//		let linear = 1-Math.abs(lnorm[0]*dir[1] - lnorm[1]*dir[0]);
-		let offset = (loc[0]*dir[1] - loc[1]*dir[0]);
-		//let offset = Math.sqrt(loc[0]*loc[0]+loc[1]*loc[1]);
-		// effective rotational mass at this point
-		let rmass = this.i_moment/(offset*offset);
-		let linear = rmass/(this.mass+rmass);
-		console.log('linear:',linear);
-		return this.mass*linear + rmass*(1-linear);
 	}
 	contains_point(x, y){
 		x -= this.cx;
@@ -518,64 +492,51 @@ class Block{
 		let mag = dist;
 		this.apply_impulse([xr, yr], dir, mag, ctx);
 	}
+	get_effective_mass(x,y,dir){
+		if(this.i_moment == Infinity) return this.mass;
+		return this.mass;
+		let loc = [x-this.cx, y-this.cy];
+		let lnorm = norm(loc);
+		let purely_linear_component = lnorm[0]*dir[0] + lnorm[1]*dir[1];
+		let ret = purely_linear_component*this.mass;
+		let mixed_vecx = dir[0] - purely_linear_component*lnorm[0];
+		let mixed_vecy = dir[1] - purely_linear_component*lnorm[1];
+		let mixed_mag = Math.sqrt(mixed_vecx*mixed_vecx+mixed_vecy*mixed_vecy);
+		let offset = Math.sqrt(loc[0]*loc[0]+loc[1]*loc[1]);
+		let rmass = this.i_moment/(offset*offset);
+		let mixed_linear = rmass/(rmass+this.mass);
+		ret += mixed_linear*this.mass*mixed_mag;
+		ret += (1-mixed_linear)*rmass*offset*mixed_mag;
+		console.log('effmass',{'purely_linear':purely_linear_component,'mixed_mag': mixed_mag, 'offset':offset, 'mass':this.mass, 'rmass':rmass, 'effmass':ret});
+		return ret;
+	}
 	apply_impulse(aloc, dir, mag, ctx=null){
 		let loc = [aloc[0]-this.cx, aloc[1]-this.cy];
 		let normloc = norm(loc);
 		let purely_linear_component = normloc[0]*dir[0] + normloc[1]*dir[1];
 		let dvx = mag*purely_linear_component/this.mass * normloc[0];
 		let dvy = mag*purely_linear_component/this.mass * normloc[1];
-/*		ctx.strokeStyle = '#0000ff';
-		ctx.beginPath();
-		ctx.moveTo(aloc[0], aloc[1]);
-		ctx.lineTo(aloc[0]+dvx*2, aloc[1]+dvy*2);
-		ctx.stroke();*/
 		this.vx += dvx;
 		this.vy += dvy;
 		let mixed_vecx = dir[0] - purely_linear_component*normloc[0];
 		let mixed_vecy = dir[1] - purely_linear_component*normloc[1];
-/*		ctx.strokeStyle = '#ff00ff';
-		ctx.beginPath();
-		ctx.moveTo(aloc[0], aloc[1]);
-		ctx.lineTo(aloc[0]+mixed_vecx*2, aloc[1]+mixed_vecy*2);
-		ctx.stroke();*/
 		// this can be done without a square root, using cross product
 		let offset2 = (loc[0]*mixed_vecy - loc[1]*mixed_vecx);
 		let offset = Math.sqrt(loc[0]*loc[0]+loc[1]*loc[1]);
 //		console.log('2 offsets should be same',offset, offset2);
-		let rmass = this.i_moment/(offset);
-		let mixed_linear = rmass / (rmass+this.mass);
-		let dr = mag*Math.sqrt(mixed_vecx*mixed_vecx+mixed_vecy*mixed_vecy)*(1-mixed_linear)/rmass;
-		if(offset2 < 0){
-			this.vr -= dr;
-		}else{
-			this.vr += dr;
+		let mixed_linear = 1;
+		if(this.i_moment != Infinity){
+			let rmass = this.i_moment/(offset*offset);
+			mixed_linear = rmass / (rmass+this.mass);
+			let dr = mag*Math.sqrt(mixed_vecx*mixed_vecx+mixed_vecy*mixed_vecy)*(1-mixed_linear)/rmass*offset;
+			if(offset2 < 0){
+				this.vr -= dr;
+			}else{
+				this.vr += dr;
+			}
 		}
 		this.vx += mag*mixed_vecx*mixed_linear/this.mass;
 		this.vy += mag*mixed_vecy*mixed_linear/this.mass;
-		return;
-		//let total_mass = this.get_effective_mass(loc[0], loc[1], dir);
-		//let rmass = total_mass - this.mass;
-		
-//		let rmass = this.i_moment/(offset*offset);
-		let linear = rmass/(this.mass+rmass);
-		this.vx += mag*linear/this.mass * dir[0];
-		this.vy += mag*linear/this.mass * dir[1];
-		let dr1 = mag*(1-linear)/rmass;
-		if(offset < 0){
-			this.vr -= dr1;
-		}else{
-			this.vr += dr1;
-		}
-		/*if(ctx != null){
-			ctx.strokeStyle = '#00ff00';
-			ctx.beginPath();
-			ctx.arc(aloc[0], aloc[1], 0.05, 0, 2*Math.PI);
-			ctx.stroke();
-			ctx.beginPath();
-			ctx.moveTo(aloc[0], aloc[1]);
-			ctx.lineTo(aloc[0]+dir[0]*mag*2, aloc[1]+dir[1]*mag*2);
-			ctx.stroke();
-		}*/
 	}
 	points(){
 		let rot = this.rot;
