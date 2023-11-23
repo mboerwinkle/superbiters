@@ -140,8 +140,8 @@ class World{
 			}
 			let otheridx = (v >> 1)-1;
 			let rollotherback = (1 == (1&v));
-			if(rollmeback && !rollotherback){
-				// promote as rollback
+			if(!rollmeback && rollotherback){
+				// promote as more "real"
 				this.cgrid[c] = pen;
 			}
 			if(otheridx == myidx){
@@ -181,17 +181,19 @@ class World{
 		this.collisions = {};
 		this.blocks.forEach((b, idx) => {
 			b.step(time);
-			// draw on the collision map the convex hull of the current block and the stepped block
-			// The hull causes other people to rollback, but not me.
-			this.cdrawpoly(idx*2+2, hull(b.points().concat(b.npoints())));
-			// The new position (which is inside the hull) causes me to rollback, but not (necessarily) other people.
-			// The anti-tunnel tail follows the same rules as the new position
-			// We draw the anti-tunnel tail first to hopefully get an accurate 'first collision' point (especially for small, fast, objects).
+			// Our current position is occupied, and we don't rollback
+			// if someone else tries to go there.
+			this.cdrawpoly(idx*2+2, b.points());
+
+			// Not sure this line is necessary (it's inside the hull),
+			// but it may give a better collision point for fast-moving objects.
 			let p1 = this.to_cgrid_coords([b.cx,b.cy]);
 			let p2 = this.to_cgrid_coords([b.ncx,b.ncy]);
 			this.cdrawline(idx*2+3, p1[0],p1[1],p2[0],p2[1]);
-			this.cdrawpoly(idx*2+3, b.npoints());
-			//this.cdrawpoly(idx+1, b.npoints());
+			// The convex hull of our old and new positions indicates the path we want to take,
+			// and will cause us to rollback if it hits something.
+			let hull_pts = hull(b.points().concat(b.npoints()));
+			this.cdrawpoly(idx*2+3, hull_pts);
 		});
 		for(let k in this.collisions){
 			let o1idx = k & 255;
