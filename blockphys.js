@@ -166,8 +166,11 @@ class World{
 			}
 			let otheridx = (v >> 1)-1;
 			let rollotherback = (1 == (1&v));
-			if(rollmeback && !rollotherback){
-				// promote as rollback
+			if((!rollmeback) && rollotherback){
+				// promote as 'more real', 'less rollback'
+				// collisions with existing locations are preferable to collisions between two new positions, because only one rollback occurs (instead of two) preventing lockup.
+				// Therefore, when we get the chance to mark something for asymmetric rollback, we take it.
+				// In practice, subtley, this actually doesn't typically end up overriding my own rollback points (since those are drawn second). Instead, this overwrites the other object's rollback points so that my rollback points won't see them if they happen to overlap here too.
 				this.cgrid[c] = pen;
 			}
 			if(otheridx == myidx){
@@ -176,6 +179,7 @@ class World{
 			}
 			if(!(rollmeback || rollotherback)){
 				// we are different, but neither person has to rollback
+				console.error('unreachable');
 				return;
 			}
 			let cid = null;
@@ -207,17 +211,15 @@ class World{
 		this.collisions = {};
 		this.blocks.forEach((b, idx) => {
 			b.step(time);
-			// draw on the collision map the convex hull of the current block and the stepped block
-			// The hull causes other people to rollback, but not me.
-			this.cdrawpoly(idx*2+2, hull(b.points().concat(b.npoints())));
-			// The new position (which is inside the hull) causes me to rollback, but not (necessarily) other people.
+			// Draw the current/rollback location. Touching this causes other folks to rollback, but not us.
+			this.cdrawpoly(idx*2+2, b.points());
+			// The new position touching anything causes me to rollback, but not (necessarily) other people.
 			// The anti-tunnel tail follows the same rules as the new position
 			// We draw the anti-tunnel tail first to hopefully get an accurate 'first collision' point (especially for small, fast, objects).
 			let p1 = this.to_cgrid_coords([b.cx,b.cy]);
 			let p2 = this.to_cgrid_coords([b.ncx,b.ncy]);
 			this.cdrawline(idx*2+3, p1[0],p1[1],p2[0],p2[1]);
 			this.cdrawpoly(idx*2+3, b.npoints());
-			//this.cdrawpoly(idx+1, b.npoints());
 		});
 		for(let k in this.collisions){
 			let o1idx = k & 255;
@@ -225,8 +227,7 @@ class World{
 			let o1 = this.blocks[o1idx];
 			let o2 = this.blocks[o2idx];
 			let coll = this.collisions[k];
-			let lx = (coll[0]+0.5)*this.cgridsize;
-			let ly = (coll[1]+0.5)*this.cgridsize;
+			let contact = [(coll[0]+0.5)*this.cgridsize, (coll[1]+0.5)*this.cgridsize];
 			let rollback1 = coll[3];
 			let rollback2 = coll[2];
 //			console.log('collisioninfo ids:', o1idx+'('+rollback1+')', o2idx+'('+rollback2+')', 'location: ('+lx+','+ly+')');
@@ -248,13 +249,13 @@ class World{
 				// energy is lost once per collision, not after
 //				restitution = 1.0;
 //			}
-			let s1 = o1.get_point_speed(lx,ly);
+			let s1 = o1.get_point_speed(contact);
 			let s2 = null;
 			if(o2idx == 255){
 				// The map is stationary
 				s2 = [0,0];
 			}else{
-				s2 = o2.get_point_speed(lx,ly);
+				s2 = o2.get_point_speed(contact);
 			}
 			let vdelta = [s2[0]-s1[0],s2[1]-s1[1]];
 			if(vdelta[0] == 0 && vdelta[1] == 0){
@@ -262,13 +263,8 @@ class World{
 				continue;
 			}
 			let impulse_dir = norm(vdelta);
-//			console.log('points into block:',o1.surface_vec_points_in([lx,ly], impulse_dir), !o2.surface_vec_points_in([lx, ly], impulse_dir));
-			let contact = [lx,ly];
 			let o1pointsinside = o1.surface_vec_points_in(contact, impulse_dir);
-			let o2pointsinside = false;
-			if(o2idx != 255){
-				o2pointsinside = !o2.surface_vec_points_in(contact, impulse_dir);
-			}
+			let o2pointsinside = (o2idx == 255) ? true : !o2.surface_vec_points_in(contact, impulse_dir);
 			if(!o1pointsinside || !o2pointsinside){
 				// These items may actually be colliding while moving away from each other.
 				if(o1pointsinside || o2pointsinside){
@@ -477,33 +473,11 @@ class Block{
 			return vy < 0;
 		}
 	}
-/*	get_point_momentum(x, y){
-		//relative
-		let rx = x-this.cx;
-		let ry = y-this.cy;
-		let dist2 = rx*rx+ry*ry;
-		let dist = Math.sqrt(dist2);
-		let vx = this.vx*this.mass;
-		let vy = this.vy*this.mass;
-		if(dist != 0){
-			let vr = this.vr*this.i_moment;
-			vx += (-ry/dist)*vr;
-			vy += (rx/dist)*vr;
-		}
-		//determine the radial and linear components of vx and vy to determine the proportion of rmass vs mass
-		return [vx,vy];
-	}*/
-	get_point_speed(x, y){
-		//relative
-		let rx = x-this.cx;
-		let ry = y-this.cy;
-		//let dist = Math.sqrt(rx*rx+ry*ry);
-		//let vr = this.vr*dist;
-		//let vx = this.vx+(-ry/dist)*vr;
-		//let vy = this.vy+(rx/dist)*vr;
-		let vx = this.vx-ry*this.vr;
-		let vy = this.vy+rx*this.vr;
-		return [vx,vy];
+	get_point_speed(l){
+		return [
+			this.vx-(l[1]-this.cy)*this.vr,
+			this.vy+(l[0]-this.cx)*this.vr
+		];
 	}
 	drag_to(internal_loc, worldloc, time, ctx){
 		let x = internal_loc[0];
