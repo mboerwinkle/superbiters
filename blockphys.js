@@ -10,6 +10,32 @@ function norm(v){
 function orientation(p,q,r){
 	return (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1]);
 }
+function solve_2x2_linear(c1, c2) {
+	// c1 / c2 are coefficients for Ax + By + C = 0
+	// Maybe there's a better way! Or maybe not. Who cares.
+
+	let tmp;
+	// Swap top and bottom rows. We want c2[0] to be non-zero if possible.
+	if (c2[0] == 0) { tmp = c2; c2 = c1; c1 = tmp; }
+	// It's still 0, how frustrating.
+	if (c2[0] == 0) {
+		// Hopefully this case never comes up, but that means we've got no coefficient for the first variable...
+		// Well, we want c2[1] to be non-zero then.
+		if (c2[1] == 0) { tmp = c2; c2 = c1; c1 = tmp; }
+		// No coefficients for either variable! Dang.
+		if (c2[1] == 0) return [0, 0];
+		return [0, -c2[2] / c2[1]];
+	}
+	// Okay, outside of that case, we know c2[0] is well-defined, and can produce this:
+	let ratio = -c1[0] / c2[0];
+	// Make a new eqn that has c3[0] == 0, to solve for y.
+	let c3 = [];
+	for (let i = 0; i < 3; i++) c3[i] = c1[i] + ratio*c2[i];
+	let y = c3[1] ? -c3[2]/c3[1] : 0;
+	// Can plug that in and use c2 to solve for x
+	let x = (c2[2] + y*c2[1]) / -c2[0];
+	return [x,y];
+}
 function affine_determinant(m){
 	//0 2 4
 	//1 3 5
@@ -237,10 +263,11 @@ class World{
 			}
 			let impulse_dir = norm(vdelta);
 //			console.log('points into block:',o1.surface_vec_points_in([lx,ly], impulse_dir), !o2.surface_vec_points_in([lx, ly], impulse_dir));
-			let o1pointsinside = o1.surface_vec_points_in([lx,ly], impulse_dir);
+			let contact = [lx,ly];
+			let o1pointsinside = o1.surface_vec_points_in(contact, impulse_dir);
 			let o2pointsinside = false;
 			if(o2idx != 255){
-				o2pointsinside = !o2.surface_vec_points_in([lx,ly], impulse_dir);
+				o2pointsinside = !o2.surface_vec_points_in(contact, impulse_dir);
 			}
 			if(!o1pointsinside || !o2pointsinside){
 				// These items may actually be colliding while moving away from each other.
@@ -255,20 +282,34 @@ class World{
 					continue;
 //					console.log("points-outside collision");
 				}
-//			}
 			}
-			let vdeltamag = Math.sqrt(vdelta[0]*vdelta[0]+vdelta[1]*vdelta[1]);
-			let m1 = o1.get_effective_mass(lx,ly,impulse_dir);
-			if(o2idx == 255){
-				// Collided with the map
-				o1.apply_impulse([lx,ly], impulse_dir, m1*(1+restitution)*vdeltamag);
-			}else{
-				let m2 = o2.get_effective_mass(lx,ly,impulse_dir);
-				//https://en.wikipedia.org/wiki/Inelastic_collision
-				let impulse_mag = (m1*m2)/(m1+m2)*(1+restitution)*vdeltamag;
-				o1.apply_impulse([lx,ly], impulse_dir, impulse_mag);
-				o2.apply_impulse([lx,ly], impulse_dir, -impulse_mag);
+
+			// Now we just need to construct a system of linear equations for how
+			// a unit of impulse affects the vdelta, and we'll be golden.
+			// Impulse has units kg*m/s, and we want acceleration velocity per unit of impulse,
+			// so these items have units 1/kg.
+			let o1effects = o1.impulse_response_matrix(contact);
+			let o2effects;
+			if(o2idx == 255) {
+				o2effects = [0, 0, 0, 0];
+			} else {
+				o2effects = o2.impulse_response_matrix(contact);
 			}
+			// coeffecients for a couple matrices we need to solve...
+			// Variables are X/Y components of impulse.
+			// c1 is X component of velocity, c2 is Y.
+			// o2 is going to receive the negation of the impulse, so no need to flip o2effects here.
+			let c1 = [o1effects[0]+o2effects[0], o1effects[2]+o2effects[2], -vdelta[0]];
+			let c2 = [o1effects[1]+o2effects[1], o1effects[3]+o2effects[3], -vdelta[1]];
+			let soln = solve_2x2_linear(c1, c2);
+			let mult = 1+restitution;
+			soln[0] *= mult; soln[1] *= mult;
+			o1.apply_impulse(contact, soln);
+			if (o2idx != 255) {
+				soln[0] *= -1; soln[1] *= -1;
+				o2.apply_impulse(contact, soln);
+			}
+
 		}
 		let rollback_max = 30;
 		for(let oidx = 0; oidx < this.blocks.length; oidx++){
@@ -479,12 +520,7 @@ class Block{
 		dy = dy*time*this.mass*100;
 //		dx = (dx-current_v[0])*time*this.mass*100;
 //		dy = (dy-current_v[1])*time*this.mass*100;
-		let dist = Math.sqrt(dx*dx+dy*dy);
-		if(dist == 0) return;
-//		console.log('dragging, dist:', dist, dx, dy);
-		let dir = [dx/dist, dy/dist];
-		let mag = dist;
-		this.apply_impulse([xr, yr], dir, mag, ctx);
+		this.apply_impulse([xr, yr], [dx, dy]);
 	}
 	get_effective_mass(x,y,dir){
 		if(this.i_moment == Infinity) return this.mass;
@@ -502,33 +538,30 @@ class Block{
 		ret += (1-mixed_linear)*(rmass)*mixed_vec_mag;
 		return ret;
 	}
-	apply_impulse(aloc, dir, mag){
+	apply_impulse(aloc, impulse) {
 		let loc = [aloc[0]-this.cx, aloc[1]-this.cy];
-		let normloc = norm(loc);
-		// Handle purely-linear component
-		let purely_linear_component = normloc[0]*dir[0] + normloc[1]*dir[1];
-		this.vx += mag*purely_linear_component/this.mass * normloc[0];
-		this.vy += mag*purely_linear_component/this.mass * normloc[1];
-		let mixed_vecx = dir[0] - purely_linear_component*normloc[0];
-		let mixed_vecy = dir[1] - purely_linear_component*normloc[1];
-		let mixed_vec_mag = Math.sqrt(mixed_vecx*mixed_vecx+mixed_vecy*mixed_vecy);
-		// this can be done without a square root, using cross product
-		let offset2 = (loc[0]*mixed_vecy - loc[1]*mixed_vecx);
-		let offset = Math.sqrt(loc[0]*loc[0]+loc[1]*loc[1]);
-//		console.log('2 offsets should be same',offset, offset2);
-		let mixed_linear = 1;
-		if(this.i_moment != Infinity){
-			let rmass = this.i_moment/(offset*offset);
-			mixed_linear = rmass / (rmass+this.mass);
-			let dr = mag*(1-mixed_linear)*mixed_vec_mag/(rmass*offset);
-			if(offset2 < 0){
-				this.vr -= dr;
-			}else{
-				this.vr += dr;
-			}
-		}
-		this.vx += mag*mixed_vecx*mixed_linear/this.mass;
-		this.vy += mag*mixed_vecy*mixed_linear/this.mass;
+		this.vx += impulse[0] / this.mass;
+		this.vy += impulse[1] / this.mass;
+		this.vr += (impulse[1] * loc[0] - impulse[0] * loc[1]) / this.i_moment;
+	}
+	impulse_response_matrix(aloc) {
+		let loc = [aloc[0]-this.cx, aloc[1]-this.cy];
+		// Impulses have units kg*m/s.
+		// `w` is angular velocity (little omega), and has units 1/s.
+		// i_moment is kg*m*m.
+		// angular velocity per impulse should come out to be 1/kg/m...
+		// m/(kg*m*m) works out appropriately, we have the right units.
+		let w_response_x = -loc[1] / this.i_moment;
+		let w_response_y = loc[0] / this.i_moment;
+		let linear_response = 1 / this.mass;
+		// All returned values are in units of 1/kg,
+		// which is speed (m/s) per impulse (kg*m/s)
+		return [
+			linear_response - w_response_x*loc[1],
+			-w_response_y*loc[1],
+			w_response_x*loc[0],
+			linear_response + w_response_y*loc[0]
+		];
 	}
 	points(){
 		let width2 = this.width/2;
