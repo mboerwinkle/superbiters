@@ -127,9 +127,11 @@ class World{
 		let c = x+y*this.cgridx;
 		let v = this.cgrid[c];
 		if(v == 0){
+			// Nothing at all is in this spot yet.
 			this.cgrid[c] = pen;
 		}else{
 			if(v == 1){
+				// You've collided with the fixed map
 				let cid = (255 << 8) | myidx;
 				if(rollmeback && !(cid in this.collisions)){
 					this.collisions[cid] = [x,y,false,true];
@@ -191,50 +193,6 @@ class World{
 			this.cdrawpoly(idx*2+3, b.npoints());
 			//this.cdrawpoly(idx+1, b.npoints());
 		});
-	}
-	swap(){
-		this.blocks.forEach((b) => b.swap());
-	}
-	get_block_at(c){
-		for(let idx = 0; idx < this.blocks.length; idx++){
-			let ret = this.blocks[idx].contains_point(c[0],c[1]);
-			if(ret != false){
-				return {b:this.blocks[idx], l:ret};
-			}
-		}
-		return null;
-	}
-	// meters*scale = pixel
-	draw(ctx, scale){
-		ctx.lineWidth = 1/16; // approx 1 px
-//		ctx.fillStyle = '#FFFFFF';
-//		ctx.fillRect(0,0,ctx.canvas.width,ctx.canvas.height);
-//		ctx.transform(scale,0,0,-scale,0,ctx.canvas.height);
-		//ctx.scale(scale, scale);
-		ctx.lineJoin = "round";
-		this.blocks.forEach((b) => {
-			this.drawpoly('#000000', b.points(), ctx);
-		//	this.drawpoly('#303030', b.npoints(), ctx);
-			//this.drawpoly('#ff0000', hull(b.points().concat(b.npoints())), ctx);
-		});
-		// Draw Text
-/*			ctx.fillStyle = '#000000';
-			ctx.font = '0.1px monospace';
-			let t = ctx.getTransform();
-			ctx.transform(1, 0, 0, -1, 0, world.height);
-			//Rotation
-			this.blocks.forEach((b) => ctx.fillText(b.vr, b.cx, world.height-b.cy));
-			ctx.setTransform(t);
-		// Draw collision grid
-			ctx.fillStyle = '#0000ff50';
-			for(let x = 0; x < this.cgridx; x++){
-				for(let y = 0; y < this.cgridy; y++){
-					if(0 != this.cgrid[x+y*this.cgridx]){
-						ctx.fillRect(x*this.cgridsize, y*this.cgridsize, this.cgridsize, this.cgridsize);
-					}
-				}
-			}
-*/		//
 		for(let k in this.collisions){
 			let o1idx = k & 255;
 			let o2idx = k >> 8;
@@ -267,6 +225,7 @@ class World{
 			let s1 = o1.get_point_speed(lx,ly);
 			let s2 = null;
 			if(o2idx == 255){
+				// The map is stationary
 				s2 = [0,0];
 			}else{
 				s2 = o2.get_point_speed(lx,ly);
@@ -284,32 +243,31 @@ class World{
 				o2pointsinside = !o2.surface_vec_points_in([lx,ly], impulse_dir);
 			}
 			if(!o1pointsinside || !o2pointsinside){
-//				if(o1idx > 3 && o2idx > 3){
-					// don't debug collisions with walls
-					if(o1pointsinside || o2pointsinside){
-//						console.log("points-inside disagreement");
-					}else{
-						ctx.strokeStyle = '#ff0000';
-						ctx.beginPath();
-						ctx.moveTo(lx, ly);
-						ctx.lineTo(lx+impulse_dir[0]*0.5, ly+impulse_dir[1]*0.5);
-						ctx.stroke();
-						continue;
-//						console.log("points-outside collision");
-					}
-//				}
-				// These people are actually already trying to avoid each other
+				// These items may actually be colliding while moving away from each other.
+				if(o1pointsinside || o2pointsinside){
+//					console.log("points-inside disagreement");
+				}else{
+//					ctx.strokeStyle = '#ff0000';
+//					ctx.beginPath();
+//					ctx.moveTo(lx, ly);
+//					ctx.lineTo(lx+impulse_dir[0]*0.5, ly+impulse_dir[1]*0.5);
+//					ctx.stroke();
+					continue;
+//					console.log("points-outside collision");
+				}
+//			}
 			}
 			let vdeltamag = Math.sqrt(vdelta[0]*vdelta[0]+vdelta[1]*vdelta[1]);
 			let m1 = o1.get_effective_mass(lx,ly,impulse_dir);
 			if(o2idx == 255){
-				o1.apply_impulse([lx,ly], impulse_dir, m1*(1+restitution)*vdeltamag, ctx);
+				// Collided with the map
+				o1.apply_impulse([lx,ly], impulse_dir, m1*(1+restitution)*vdeltamag);
 			}else{
 				let m2 = o2.get_effective_mass(lx,ly,impulse_dir);
 				//https://en.wikipedia.org/wiki/Inelastic_collision
 				let impulse_mag = (m1*m2)/(m1+m2)*(1+restitution)*vdeltamag;
-				o1.apply_impulse([lx,ly], impulse_dir, impulse_mag, ctx);
-				o2.apply_impulse([lx,ly], impulse_dir, -impulse_mag, ctx);
+				o1.apply_impulse([lx,ly], impulse_dir, impulse_mag);
+				o2.apply_impulse([lx,ly], impulse_dir, -impulse_mag);
 			}
 		}
 		let rollback_max = 30;
@@ -317,12 +275,56 @@ class World{
 			let o = this.blocks[oidx];
 			if(o.rollback_count > rollback_max){
 				o.rollback_count = 0;
-				//rollbacks remove all velocity
+				// Excessive rollbacks triggers removing all velocity
 				o.vx = 0;
 				o.vy = 0;
 				o.vr = 0;
 			}
 		}
+	}
+	swap(){
+		this.blocks.forEach((b) => b.swap());
+	}
+	get_block_at(c){
+		for(let idx = 0; idx < this.blocks.length; idx++){
+			let ret = this.blocks[idx].contains_point(c[0],c[1]);
+			if(ret != false){
+				return {b:this.blocks[idx], l:ret};
+			}
+		}
+		return null;
+	}
+	// meters*scale = pixel
+	draw(ctx, scale){
+		ctx.lineWidth = 1/16; // approx 1 px
+//		ctx.fillStyle = '#FFFFFF';
+//		ctx.fillRect(0,0,ctx.canvas.width,ctx.canvas.height);
+//		ctx.transform(scale,0,0,-scale,0,ctx.canvas.height);
+		//ctx.scale(scale, scale);
+		ctx.lineJoin = "round";
+	//	this.blocks.forEach((b) => {
+	//		this.drawpoly('#000000', b.points(), ctx);
+		//	this.drawpoly('#303030', b.npoints(), ctx);
+			//this.drawpoly('#ff0000', hull(b.points().concat(b.npoints())), ctx);
+		//});
+		// Draw Text
+/*			ctx.fillStyle = '#000000';
+			ctx.font = '0.1px monospace';
+			let t = ctx.getTransform();
+			ctx.transform(1, 0, 0, -1, 0, world.height);
+			//Rotation
+			this.blocks.forEach((b) => ctx.fillText(b.vr, b.cx, world.height-b.cy));
+			ctx.setTransform(t);
+	*/	// Draw collision grid
+	/*		ctx.fillStyle = '#0000ff50';
+			for(let x = 0; x < this.cgridx; x++){
+				for(let y = 0; y < this.cgridy; y++){
+					if(0 != this.cgrid[x+y*this.cgridx]){
+						ctx.fillRect(x*this.cgridsize, y*this.cgridsize, this.cgridsize, this.cgridsize);
+					}
+				}
+			}*/
+		//
 	}
 	drawpoly(color, pts, ctx){
 		ctx.strokeStyle = color;
@@ -358,24 +360,16 @@ class Block{
 		this.world = null;
 	}
 	swap(){
-		if(!(this.has_rollback)){
-			// not rolled back
+		if(this.has_rollback){
+			// Needs to rollback
+			this.has_rollback = false;
+		}else{
+			// Doesn't need to rollback, so advance to the new position.
 			this.cx = this.ncx;
 			this.cy = this.ncy;
 			this.rot = this.nrot;
 			this.rollback_count = 0;
-		}else{
-			// rolled back
-			this.has_rollback = false;
 		}
-	}
-	imoment_filled(){
-		// Mass evenly distributed inside area
-		return this.mass*(this.width*this.width+this.height*this.height)/12;
-	}
-	imoment_hollow(){
-		// Mass concentrated at shell
-		return this.mass*(this.width*this.width+this.height*this.height)/3;
 	}
 	step(time){
 		//limit speeds
@@ -384,8 +378,8 @@ class Block{
 			this.vx *= 2400/speed;
 			this.vy *= 2400/speed;
 		}
-		if(Math.abs(this.vr) > 30*Math.PI){
-			this.vr *= 30*Math.PI/this.vr;
+		if(Math.abs(this.vr) > 10*Math.PI){
+			this.vr *= 10*Math.PI/this.vr;
 		}
 		this.nrot = this.rot+this.vr*time;
 		while(this.nrot >= 2*Math.PI) this.nrot -= 2*Math.PI;
@@ -432,7 +426,7 @@ class Block{
 			vy *= -1;
 		}
 		let vec = null;
-		if(xr >= this.width/2-this.world.cgridsize/2 && yr >= this.height/2-this.world.cgridsize/2){
+		if(xr >= this.width/2-this.world.cgridsize*0.707 && yr >= this.height/2-this.world.cgridsize*0.707){
 			return vx < 0 || vy < 0;
 		}else if(xr/this.width > yr/this.height){
 			// we are on the high-x wall. Use the x vector
@@ -462,12 +456,12 @@ class Block{
 		//relative
 		let rx = x-this.cx;
 		let ry = y-this.cy;
-		let dist2 = rx*rx+ry*ry;
-		let dist = Math.sqrt(dist2);
-		let vr = this.vr*dist;
-		let vx = this.vx+(-ry/dist)*vr;
-		let vy = this.vy+(rx/dist)*vr;
-		//determine the radial and linear components of vx and vy to determine the proportion of rmass vs mass
+		//let dist = Math.sqrt(rx*rx+ry*ry);
+		//let vr = this.vr*dist;
+		//let vx = this.vx+(-ry/dist)*vr;
+		//let vy = this.vy+(rx/dist)*vr;
+		let vx = this.vx-ry*this.vr;
+		let vy = this.vy+rx*this.vr;
 		return [vx,vy];
 	}
 	drag_to(internal_loc, worldloc, time, ctx){
@@ -494,32 +488,30 @@ class Block{
 	}
 	get_effective_mass(x,y,dir){
 		if(this.i_moment == Infinity) return this.mass;
-		return this.mass;
 		let loc = [x-this.cx, y-this.cy];
 		let lnorm = norm(loc);
 		let purely_linear_component = lnorm[0]*dir[0] + lnorm[1]*dir[1];
-		let ret = purely_linear_component*this.mass;
+		let ret = Math.abs(purely_linear_component)*this.mass;
 		let mixed_vecx = dir[0] - purely_linear_component*lnorm[0];
 		let mixed_vecy = dir[1] - purely_linear_component*lnorm[1];
-		let mixed_mag = Math.sqrt(mixed_vecx*mixed_vecx+mixed_vecy*mixed_vecy);
+		let mixed_vec_mag = Math.sqrt(mixed_vecx*mixed_vecx+mixed_vecy*mixed_vecy);
 		let offset = Math.sqrt(loc[0]*loc[0]+loc[1]*loc[1]);
 		let rmass = this.i_moment/(offset*offset);
 		let mixed_linear = rmass/(rmass+this.mass);
-		ret += mixed_linear*this.mass*mixed_mag;
-		ret += (1-mixed_linear)*rmass*offset*mixed_mag;
-		console.log('effmass',{'purely_linear':purely_linear_component,'mixed_mag': mixed_mag, 'offset':offset, 'mass':this.mass, 'rmass':rmass, 'effmass':ret});
+		ret += mixed_linear*this.mass*mixed_vec_mag;
+		ret += (1-mixed_linear)*(rmass)*mixed_vec_mag;
 		return ret;
 	}
-	apply_impulse(aloc, dir, mag, ctx=null){
+	apply_impulse(aloc, dir, mag){
 		let loc = [aloc[0]-this.cx, aloc[1]-this.cy];
 		let normloc = norm(loc);
+		// Handle purely-linear component
 		let purely_linear_component = normloc[0]*dir[0] + normloc[1]*dir[1];
-		let dvx = mag*purely_linear_component/this.mass * normloc[0];
-		let dvy = mag*purely_linear_component/this.mass * normloc[1];
-		this.vx += dvx;
-		this.vy += dvy;
+		this.vx += mag*purely_linear_component/this.mass * normloc[0];
+		this.vy += mag*purely_linear_component/this.mass * normloc[1];
 		let mixed_vecx = dir[0] - purely_linear_component*normloc[0];
 		let mixed_vecy = dir[1] - purely_linear_component*normloc[1];
+		let mixed_vec_mag = Math.sqrt(mixed_vecx*mixed_vecx+mixed_vecy*mixed_vecy);
 		// this can be done without a square root, using cross product
 		let offset2 = (loc[0]*mixed_vecy - loc[1]*mixed_vecx);
 		let offset = Math.sqrt(loc[0]*loc[0]+loc[1]*loc[1]);
@@ -528,7 +520,7 @@ class Block{
 		if(this.i_moment != Infinity){
 			let rmass = this.i_moment/(offset*offset);
 			mixed_linear = rmass / (rmass+this.mass);
-			let dr = mag*Math.sqrt(mixed_vecx*mixed_vecx+mixed_vecy*mixed_vecy)*(1-mixed_linear)/rmass*offset;
+			let dr = mag*(1-mixed_linear)*mixed_vec_mag/(rmass*offset);
 			if(offset2 < 0){
 				this.vr -= dr;
 			}else{
@@ -539,15 +531,16 @@ class Block{
 		this.vy += mag*mixed_vecy*mixed_linear/this.mass;
 	}
 	points(){
-		let rot = this.rot;
-		let width = this.width;
-		let height = this.height;
+		let width2 = this.width/2;
+		let height2 = this.height/2;
+		let cos = Math.cos(this.rot);
+		let sin = Math.sin(this.rot);
 		let cx = this.cx;
 		let cy = this.cy;
-		let o1x = width/2*Math.cos(rot) - height/2*Math.sin(rot);
-		let o1y = width/2*Math.sin(rot) + height/2*Math.cos(rot);
-		let o2x = width/2*Math.cos(rot) + height/2*Math.sin(rot);
-		let o2y = width/2*Math.sin(rot) - height/2*Math.cos(rot);
+		let o1x = width2*cos - height2*sin;
+		let o1y = width2*sin + height2*cos;
+		let o2x = width2*cos + height2*sin;
+		let o2y = width2*sin - height2*cos;
 		return [
 			[cx+o1x, cy+o1y],
 			[cx+o2x, cy+o2y],
@@ -556,15 +549,16 @@ class Block{
 		];
 	}
 	npoints(){
-		let rot = this.nrot;
-		let width = this.width;
-		let height = this.height;
+		let width2 = this.width/2;
+		let height2 = this.height/2;
+		let cos = Math.cos(this.nrot);
+		let sin = Math.sin(this.nrot);
 		let cx = this.ncx;
 		let cy = this.ncy;
-		let o1x = width/2*Math.cos(rot) - height/2*Math.sin(rot);
-		let o1y = width/2*Math.sin(rot) + height/2*Math.cos(rot);
-		let o2x = width/2*Math.cos(rot) + height/2*Math.sin(rot);
-		let o2y = width/2*Math.sin(rot) - height/2*Math.cos(rot);
+		let o1x = width2*cos - height2*sin;
+		let o1y = width2*sin + height2*cos;
+		let o2x = width2*cos + height2*sin;
+		let o2y = width2*sin - height2*cos;
 		return [
 			[cx+o1x, cy+o1y],
 			[cx+o2x, cy+o2y],

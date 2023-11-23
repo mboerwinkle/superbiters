@@ -91,6 +91,8 @@ function reeval_enabled(){
 				tool_add_object.disabled = false;
 				if(tool_add_object.value[0] != '$'){
 					tool_add_rotation.disabled = false;
+				}else{
+					tool_add_rotation.value = 0;
 				}
 			}
 			exportmapbutton.disabled = false;
@@ -120,11 +122,10 @@ function canvas_to_game_coords(c){
 	let y = c[1];
 	return [x*m[0]+y*m[2]+m[4], x*m[1]+y*m[3]+m[5]];
 }
-let substeps = 2;
+let substeps = 10;
 let fps = 60;
 let speedmult = 1;
 window.setInterval(function () {
-	ctx.resetTransform();
 	ctx.clearRect(0, 0, canv.width, canv.height);
 	if(map.farbackground != null){
 		ctx.drawImage(map.farbackground, 0,0, 800,400);
@@ -139,7 +140,6 @@ window.setInterval(function () {
 	if(running){
 		for(let i = 0; i < substeps; i++){
 			mapinst.world.step(1/fps/substeps);
-			mapinst.world.draw(ctx);
 			mapinst.world.swap();
 			if(block != null){
 				block.b.drag_to(block.l, ptr, 1/fps/substeps, ctx);
@@ -149,12 +149,8 @@ window.setInterval(function () {
 	}else{
 		map.draw_map_objects(ctx);
 		if(tool_mode_add.checked){
-			if(tool_add_object.value[0] == '$'){
-				
-			}else{
-				// draw preview pre-place item
-				object_definitions[tool_add_object.value].draw(ctx, ptr[0], ptr[1], tool_add_rotation.value*Math.PI/180);
-			}
+			// draw preview pre-place item
+			object_definitions[tool_add_object.value].draw(ctx, ptr[0], ptr[1], tool_add_rotation.value*Math.PI/180);
 		}else if(tool_mode_delete.checked){
 			let closest = map.closest_object(ptr[0], ptr[1]);
 			if(closest != null) map.draw_highlight_object(ctx, closest);

@@ -5,9 +5,6 @@ let CGRIDSIZE = 1/PXM;
 class MapDefinition{
 	constructor(){
 		this.name = "UnnamedMap";
-		this.playerspawns = [[],[]];
-		this.itemspawns = [];
-		this.flagspawns = [[],[]];
 		this.objects = [];
 		this.walls = [];
 		this.foreground = null;
@@ -75,7 +72,7 @@ class MapDefinition{
 		for(let y=1; y<h-1; y++){
 			for(let x=1; x<w-1; x++){
 				let alpha = dat[x*4+y*4*w+3];
-				if(alpha != 0 && [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]].some((c) => dat[c[0]*4+c[1]*4*w+3] == 0)){
+				if(alpha != 0 && [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]].some((c) => (dat[(x+c[0])*4+(y+c[1])*4*w+3] === 0))){
 					this.walls.push([x/PXM, y/PXM]);
 				}
 			}
@@ -98,9 +95,6 @@ class MapDefinition{
 		}
 		arch.add_item('DEF.JSON', {
 			"name":this.name,
-			"playerspawns":this.playerspawns,
-			"itemspawns":this.itemspawns,
-			"flagspawns":this.flagspawns,
 			"objects":this.objects
 		});
 		return await marchive_compress(arch);
@@ -130,9 +124,6 @@ async function import_map_definition(f){
 	}
 	let def = arch['DEF.JSON'];
 	ret.name = def['name'];
-	ret.playerspawns = def['playerspawns'];
-	ret.itemspawns = def['itemspawns'];
-	ret.flagspawns = def['flagspawns'];
 	ret.objects = def['objects'];
 	return ret;
 }
@@ -183,7 +174,16 @@ class Map{
 			let cg = this.world.to_cgrid_coords(c);
 			return cg[0]+cg[1]*this.world.cgridx;
 		});
-		this.objects = this.def.objects.map((o) => new Obj(object_definitions[o[0]], o[1], o[2], o[3]));
+		this.playerspawns = [[],[]];
+		this.itemspawns = [];
+		this.flagspawns = [[],[]];
+		this.objects = [];
+		this.def.objects.forEach((o) => {
+			if(o[0][0] == '$'){
+			}else{
+				this.objects.push(new Obj(object_definitions[o[0]], o[1], o[2], o[3]));
+			}
+		});
 		this.objects.forEach((o) => this.world.add_block(o.phys));
 	}
 	draw(ctx){
