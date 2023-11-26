@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SUPERBITERS</title>
+<meta name="description" content="SUPERBITERS">
+</head>
+<body>
+<h1>SUPERBITERS</h2>
+<div>
+<button type=button onclick="this.nextElementSibling.showModal()">Configure Character</button>
+<dialog id="dia_configure_character">
+	<h1>Configure Character</h1>
+	<table>
+	<tr>
+		<td><label for='input_character_name'>Name:</label></td>
+		<td><input type="text" id="input_character_name"></td>
+	</tr>
+	<tr>
+		<td><label for='input_character_color'>Color:</label></td>
+		<td><input type="color" id="input_character_color"></td>
+	</tr>
+	</table>
+	<button type=button onclick="this.parentNode.close()">Close</button>
+</dialog>
+<button type=button onclick="this.nextElementSibling.showModal()">Join Room</button>
+<dialog id="dia_join_room">
+	<h1>Join Room</h1>
+	<div>
+	<label for='input_room_name'>Room Name:</label><input type="text" id="input_room_name" required>
+	</div>
+	<button type=button onclick='join_room(document.getElementById("input_room_name").value); this.parentNode.close()'>Join</button><button type=button onclick="this.parentNode.close()">Cancel</button>
+</dialog>
+<button type=button onclick="this.nextElementSibling.showModal()">Serve Custom Map</button>
+<dialog id="dia_serve_custom_map">
+	<h1>Serve Custom Map</h1>
+	<p>If you set a map here, it will show up in the inter-round voting screen</p>
+	<div>
+		<label for="input_custommap">Map File:</label><input type="file" id="input_custommap" accept=".sm.gz"><button type="button" onclick="this.previousElementSibling.value = ''">Clear Map</button>
+	</div>
+	<button type=button onclick="this.parentNode.close()">Close</button>
+</dialog>
+</div>
+<div><button type=button onclick="send_start_round('Burg')">Start Round</button></div>
+<div>
+<canvas id="gamecanvas" width=800 height=400 style="image-rendering:crisp-edges;image-rendering:pixelated;"></canvas>
+</div>
+<script src="/time/time.js"></script>
+<script src="/poolsig/PoolSig.js"></script>
+<script src="/poolsig/PeerRtc.js"></script>
+<script src="marchive.js"></script>
+<script src="blockphys.js"></script>
+<script src="map.js"></script>
+<script src="superbiters.js"></script>
+
+</body></html>

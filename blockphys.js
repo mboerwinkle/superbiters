@@ -100,12 +100,11 @@ class World{
 		this.cgrid = [];
 		this.collisions = [];
 		this.blocks = [];
-		this.steppedblocks = [];
 		this.fixedpoints = [];
 	}
 	add_block(block){
 		this.blocks.push(block);
-		block.world = this;
+		block.cgridsize = this.cgridsize;
 	}
 	to_cgrid_coords(pt){
 		return [Math.trunc(pt[0]/this.cgridsize), Math.trunc(pt[1]/this.cgridsize)];
@@ -118,13 +117,13 @@ class World{
 			lastp = p;
 		}
 	}
-	cdrawline(pen, x0,y0,x1,y1){
+	cdrawline(pen, x0,y0,x1,y1, pointfunc = this.cdrawpoint.bind(this)){
 		let dx = Math.abs(x1 - x0);
 		let dy = -Math.abs(y1 - y0);
 		let sx = (x0 < x1) ? 1 : -1;
 		let sy = (y0 < y1) ? 1 : -1;
 		let err = dx + dy;
-		this.cdrawpoint(pen,x0,y0);
+		if(!pointfunc(pen,x0,y0)) return;
 		if(Number.isNaN(x0) ||Number.isNaN(x1)||Number.isNaN(y0)||Number.isNaN(y1)) return;
 		while (true) {
 			if (x0 == x1 && y0 == y1) {
@@ -135,19 +134,19 @@ class World{
 				if(x0 == x1) break;
 				err += dy;
 				x0 += sx;
-				this.cdrawpoint(pen,x0,y0);
+				if(!pointfunc(pen,x0,y0)) return;
 			}
 			if (e2 <= dx) {
 				if(y0 == y1) break;
 				err += dx;
 				y0 += sy;
-				this.cdrawpoint(pen,x0,y0);
+				if(!pointfunc(pen,x0,y0)) return;
 			}
 		}
-		this.cdrawpoint(pen, x0, y0);
+		pointfunc(pen, x0, y0);
 	}
 	cdrawpoint(pen, x,y){
-		if(x < 0 || y < 0 || x >= this.cgridx || y >= this.cgridy) return;
+		if(x < 0 || y < 0 || x >= this.cgridx || y >= this.cgridy) return true;
 		let rollmeback = (1 == (1&pen));
 		let myidx = (pen >> 1)-1;
 		let c = x+y*this.cgridx;
@@ -162,7 +161,7 @@ class World{
 				if(rollmeback && !(cid in this.collisions)){
 					this.collisions[cid] = [x,y,false,true];
 				}
-				return;
+				return true;
 			}
 			let otheridx = (v >> 1)-1;
 			let rollotherback = (1 == (1&v));
@@ -175,12 +174,12 @@ class World{
 			}
 			if(otheridx == myidx){
 				// this is the same object
-				return;
+				return true;
 			}
 			if(!(rollmeback || rollotherback)){
 				// we are different, but neither person has to rollback
-				console.error('unreachable');
-				return;
+				throw new Error('Unreachable - rollback location collision');
+				return true;
 			}
 			let cid = null;
 			let rollfirstback = null;
@@ -203,6 +202,7 @@ class World{
 				this.collisions[cid] = [x,y,rollfirstback,rollsecondback];
 			}
 		}
+		return true;
 	}
 	step(time){
 		let cgridbuf = new ArrayBuffer(this.cgridx*this.cgridy);
@@ -220,6 +220,76 @@ class World{
 			let p2 = this.to_cgrid_coords([b.ncx,b.ncy]);
 			this.cdrawline(idx*2+3, p1[0],p1[1],p2[0],p2[1]);
 			this.cdrawpoly(idx*2+3, b.npoints());
+		});
+		// Process constraints
+/*
+previous_error := 0
+integral := 0
+loop:
+   error := setpoint − measured_value
+   proportional := error;
+   integral := integral + error × dt
+   derivative := (error − previous_error) / dt
+   output := Kp × proportional + Ki × integral + Kd × derivative
+   previous_error := error
+   wait(dt)
+   goto loop*/
+		this.blocks.forEach((b, idx) => {
+			b.constraints.forEach((c) => {
+				if(c[0] == 1){
+					// rotation constraint
+					let pid = c[2];
+					let delta = b.rot - c[1];
+					if(delta < -Math.PI) delta += 2*Math.PI;
+					if(delta > Math.PI) delta -= 2*Math.PI;
+					pid[4] += delta*time;
+					let derivative = (delta-pid[3])/time;
+					b.vr -= (pid[0]*delta + pid[1]*pid[4] + pid[2]*derivative)/time;
+					pid[3] = delta;
+				}else if(c[0] == 2){
+					// repulsor
+					let cos = Math.cos(b.rot);
+					let sin = Math.sin(b.rot);
+					let sx = c[1][0]*cos - c[1][1]*sin;
+					let sy = c[1][0]*sin + c[1][1]*cos;
+					let cstart = this.to_cgrid_coords([sx+b.cx, sy+b.cy]);
+					let ex = c[2][0]*cos - c[2][1]*sin;
+					let ey = c[2][0]*sin + c[2][1]*cos;
+					let cend = this.to_cgrid_coords([ex+b.cx, ey+b.cy]);
+					let ccoll = null;
+					this.cdrawline(idx, ...cstart, ...cend, (myidx, x, y) => {
+						if(x < 0 || y < 0 || x >= this.cgridx || y >= this.cgridy) return true;
+						let c = x+y*this.cgridx;
+						let v = this.cgrid[c];
+						if(v != 0){
+							let otheridx = (v >> 1)-1;
+							if(otheridx != myidx){
+								ccoll = [x, y];
+								return false;
+							}
+						}
+						return true;
+					});
+					if(ccoll != null){
+						ccoll[0] = (ccoll[0]+0.5)*this.cgridsize;
+						ccoll[1] = (ccoll[1]+0.5)*this.cgridsize;
+						// our ray collided with something, so we can possibly push.
+						let pid = c[4];
+						let colldist = Math.sqrt(Math.pow(ccoll[0]-b.cx, 2) + Math.pow(ccoll[1]-b.cy, 2));
+						let delta = colldist - c[3];
+						pid[4] += delta*time;
+						let derivative = (delta-pid[3])/time;
+						let dv = (pid[0]*delta + pid[1]*pid[4] + pid[2]*derivative)/time;
+						let pushdir = norm([ex-sx, ey-sy]);
+						pid[3] = delta;
+						if(dv < 0){
+							// The controller needs to know about things beyond its set distance. But also, it can't pull.
+							b.vx += pushdir[0]*dv;
+							b.vy += pushdir[1]*dv;
+						}
+					}
+				}
+			});
 		});
 		for(let k in this.collisions){
 			let o1idx = k & 255;
@@ -394,7 +464,14 @@ class Block{
 		this.gravity = gravity;
 		this.rollback_count = 0;
 		this.has_rollback = false;
-		this.world = null;
+		this.cgridsize = 0.1;
+		this.constraints = [];
+	}
+	add_constraint(data){
+		//May wish to reference https://pidexplained.com/how-to-tune-a-pid-controller/ for tuning instructions
+		//Rotational: [1, angle, [kp, ki, kd, 0(previous error), 0(integral accumulator)]]
+		//Repulsor: [2, [raystartx, raystarty], [rayendx, rayendy], desireddistance, [kp,ki,kd,0,0]]
+		this.constraints.push(data);
 	}
 	swap(){
 		if(this.has_rollback){
@@ -463,7 +540,7 @@ class Block{
 			vy *= -1;
 		}
 		let vec = null;
-		if(xr >= this.width/2-this.world.cgridsize*0.707 && yr >= this.height/2-this.world.cgridsize*0.707){
+		if(xr >= this.width/2-this.cgridsize*0.707 && yr >= this.height/2-this.cgridsize*0.707){
 			return vx < 0 || vy < 0;
 		}else if(xr/this.width > yr/this.height){
 			// we are on the high-x wall. Use the x vector

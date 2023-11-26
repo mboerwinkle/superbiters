@@ -110,11 +110,13 @@ async function import_map_definition(f){
 	}
 	if('IPLN.PNG' in arch){
 		ret.inplane = arch['IPLN.PNG'];
-		if(ret.complete){
-			ret.recalc_walls();
-		}else{
-			ret.inplane.onload = function(){ret.recalc_walls()};
-		}
+		let imgLoadProm = new Promise(resolve => {
+			ret.inplane.onload = function(){
+				ret.recalc_walls();
+				resolve()
+			};
+		});
+		await imgLoadProm;
 	}
 	if('BGND.PNG' in arch){
 		ret.background = arch['BGND.PNG'];
@@ -157,10 +159,27 @@ class ObjectDefinition{
 	}
 }
 class Obj{
-	constructor(objdef, x, y, r){
+	constructor(objdef, x, y, r, g = -9.8){
 		this.def = objdef;
-		this.map = map;
-		this.phys = new Block(objdef.width, objdef.height, objdef.mass, objdef.i_moment, x, y, r, 0, 0, 0, -9.8);
+		this.phys = new Block(objdef.width, objdef.height, objdef.mass, objdef.i_moment, x, y, r, 0, 0, 0, g);
+		this.backref = [];
+	}
+	clone(){
+		let ret = new Obj(this.def, this.phys.cx, this.phys.cy, this.phys.rot, this.phys.gravity);
+		ret.backref = this.backref;
+		ret.phys.vx = this.phys.vx;
+		ret.phys.vy = this.phys.vy;
+		ret.phys.vr = this.phys.vr;
+		ret.phys.rollback_count = this.phys.rollback_count;
+		ret.phys.cgridsize = this.phys.cgridsize;
+		ret.phys.constraints = window.structuredClone(this.phys.constraints);
+		return ret;
+	}
+	enforce_backrefs(){
+		this.backref.forEach((br) => br[0] = this);
+	}
+	add_backref(ref){
+		this.backref.push(ref);
 	}
 	draw(ctx){
 		this.def.draw(ctx, this.phys.cx, this.phys.cy, this.phys.rot);
@@ -180,6 +199,17 @@ class Map{
 		this.objects = [];
 		this.def.objects.forEach((o) => {
 			if(o[0][0] == '$'){
+				if(o[0] == '$RedPlayerSpawn$'){
+					this.playerspawns[0].push([o[1],o[2]]);
+				}else if(o[0] == '$BluePlayerSpawn$'){
+					this.playerspawns[1].push([o[1],o[2]]);
+				}else if(o[0] == '$RedFlagSpawn$'){
+					this.flagspawns[0].push([o[1],o[2]]);
+				}else if(o[0] == '$BlueFlagSpawn$'){
+					this.flagspawns[1].push([o[1],o[2]]);
+				}else if(o[0] == '$Item$'){
+					this.itemspawns.push([o[1],o[2]]);
+				}
 			}else{
 				this.objects.push(new Obj(object_definitions[o[0]], o[1], o[2], o[3]));
 			}
