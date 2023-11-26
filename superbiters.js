@@ -210,7 +210,8 @@ class SB_Round{
 	create_avatar(x, y){
 		let ava = new Obj(object_definitions['player_body'], x, y, 0);
 		ava.phys.add_constraint([1, 0, [0.00001, 0.00000001, 0.00002, 0, 0]]);
-		ava.phys.add_constraint([2, [0,0], [0,1.5], 1, [0.01, 0.00000001, 0.00025, 0, 0]]);
+		ava.phys.add_constraint([2, [0.3,0], [0.3,1.5], 1, [0.01, 0.00000001, 0.00025, 0, 0]]);
+		ava.phys.add_constraint([2, [-0.3,0], [-0.3,1.5], 1, [0.01, 0.00000001, 0.00025, 0, 0]]);
 		let ret = [ava];
 		ava.add_backref(ret);
 		return ret;
