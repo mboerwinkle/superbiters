@@ -163,6 +163,7 @@ class Obj{
 		this.def = objdef;
 		this.phys = new Block(objdef.width, objdef.height, objdef.mass, objdef.i_moment, x, y, r, 0, 0, 0, g);
 		this.backref = [];
+		this.label = null;
 	}
 	clone(){
 		let ret = new Obj(this.def, this.phys.cx, this.phys.cy, this.phys.rot, this.phys.gravity);
@@ -183,6 +184,19 @@ class Obj{
 	}
 	draw(ctx){
 		this.def.draw(ctx, this.phys.cx, this.phys.cy, this.phys.rot);
+		if(this.label != null){
+			ctx.font = 'bold 0.5px Ariel';
+			ctx.textBaseline = 'top';
+			ctx.textAlign = 'center';
+			ctx.fillStyle = '#0008';
+			// fixme cache this
+			let labelinfo = ctx.measureText(this.label);
+			let pad = 0;
+			ctx.fillRect(this.phys.cx-labelinfo.actualBoundingBoxLeft-pad, this.phys.cy-labelinfo.actualBoundingBoxAscent-pad, labelinfo.actualBoundingBoxLeft+labelinfo.actualBoundingBoxRight+2*pad, labelinfo.actualBoundingBoxDescent+labelinfo.actualBoundingBoxAscent+2*pad);
+			//px are equal to meters in this context
+			ctx.fillStyle = '#fff8';
+			ctx.fillText(this.label, this.phys.cx, this.phys.cy);
+		}
 	}
 }
 class Map{

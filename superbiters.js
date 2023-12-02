@@ -112,9 +112,11 @@ class SB_Round{
 			'frame':0,
 			// a complete deep clone of map.objects. Not populated for active state
 			'cqidx':0,
-			// previous state
-			'prev':null
 		}
+		// circular buffer of states
+		this.statearray = Array(300);
+		this.statearray[0] = this.state;
+		this.statearrayidx = 0;
 		players.forEach((p) => {
 			this.players[p] = {
 				dead : {'rframe':1000/cFrameMS},
@@ -128,9 +130,10 @@ class SB_Round{
 		window.requestAnimationFrame(this.drawframe.bind(this));
 	}
 	snapshot(){
-		let prevprevstate = this.state.prev;
-		this.state.prev = null;
+		let newidx = (this.statearrayidx+1)%this.statearray.length;
 		let prevstate = window.structuredClone(this.state);
+		this.statearray[newidx] = this.state;
+		this.statearray[this.statearrayidx] = prevstate;
 		prevstate.objects = this.map.objects.map((o) => o.clone());
 		prevstate.players = {};
 		for(let k in this.players){
@@ -141,8 +144,7 @@ class SB_Round{
 				controls : Array.from(p.controls)
 			}
 		}
-		prevstate.prev = prevprevstate;
-		this.state.prev = prevstate;
+		this.statearrayidx = newidx;
 	}
 	rand(){
 		this.state.rstate = xorshift32(this.state.rstate);
@@ -181,7 +183,7 @@ class SB_Round{
 				let p = this.players[pname];
 				if(p.dead && p.dead.rframe == this.state.frame){
 					p.dead = false;
-					p.avatar = this.create_avatar(...(this.map.playerspawns[this.rand()%2][this.rand()%3]));
+					p.avatar = this.create_avatar(...(this.map.playerspawns[this.rand()%2][this.rand()%3]), pname);
 					// Add the avatar's physics body as a map object
 					this.map.objects.push(p.avatar[0]);
 					this.map.world.add_block(p.avatar[0].phys);
@@ -189,11 +191,17 @@ class SB_Round{
 				//punch,shoot,grenade,special,left,right,up,down
 				if(p.avatar == null) continue;
 				p.avatar[0].phys.constraints[0][1] = 0;
+				p.avatar[0].phys.constraints[3][1] = 0;
 				if(p.controls[4]){
-					p.avatar[0].phys.constraints[0][1] = -0.1;
+//					p.avatar[0].phys.constraints[0][1] = -0.1;
+					p.avatar[0].phys.constraints[3][1] = -1.5;
 				}
 				if(p.controls[5]){
-					p.avatar[0].phys.constraints[0][1] = 0.1;
+//					p.avatar[0].phys.constraints[0][1] = 0.1;
+					p.avatar[0].phys.constraints[3][1] = 1.5;
+				}
+				if(p.controls[6]){
+					p.avatar[0].phys.vy -= 0.2;
 				}
 			}
 			this.map.world.step(cFrameMS/1000);
@@ -207,23 +215,25 @@ class SB_Round{
 		}
 		if(this.running) window.requestAnimationFrame(this.drawframe.bind(this));
 	}
-	create_avatar(x, y){
+	create_avatar(x, y, name){
 		let ava = new Obj(object_definitions['player_body'], x, y, 0);
-		ava.phys.add_constraint([1, 0, [0.00001, 0.00000001, 0.00002, 0, 0]]);
-		ava.phys.add_constraint([2, [0.3,0], [0.3,1.5], 1, [0.01, 0.00000001, 0.00025, 0, 0]]);
-		ava.phys.add_constraint([2, [-0.3,0], [-0.3,1.5], 1, [0.01, 0.00000001, 0.00025, 0, 0]]);
+		ava.label = name;
+		ava.phys.add_constraint([1, 0, [15, 0, 10, 0, 0, -10, 10]]);
+		ava.phys.add_constraint([2, [0.28,0], [0.28,1.5], 1, [80, 0, 15, 0, 0, -20, 0]]);
+		ava.phys.add_constraint([2, [-0.28,0], [-0.28,1.5], 1, [80, 0, 15, 0, 0, -20, 0]]);
+		ava.phys.add_constraint([3, 0, [1, 0]]);
 		let ret = [ava];
 		ava.add_backref(ret);
 		return ret;
 	}
 	applyInput(name, frame, control, value){
-		let reverted = false;
-		while(this.state.frame > frame){
-			this.state = this.state.prev;
-			reverted = true;
-		}
-		if(reverted){
-			console.log('reverted');
+		if(this.state.frame > frame){
+			let sidx = (this.statearrayidx-1+this.statearray.length)%this.statearray.length;
+			while(this.statearray[sidx].frame > frame){
+				sidx = (sidx-1+this.statearray.length)%this.statearray.length;
+			}
+			this.state = this.statearray[sidx];
+			this.statearrayidx = sidx;
 			this.map.objects = this.state.objects;
 			this.state.objects = null;
 			this.players = this.state.players;

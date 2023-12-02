@@ -124,20 +124,19 @@ class World{
 		let sy = (y0 < y1) ? 1 : -1;
 		let err = dx + dy;
 		if(!pointfunc(pen,x0,y0)) return;
-		if(Number.isNaN(x0) ||Number.isNaN(x1)||Number.isNaN(y0)||Number.isNaN(y1)) return;
 		while (true) {
 			if (x0 == x1 && y0 == y1) {
-				break;
+				return;
 			}
         		let e2 = 2 * err;
 			if (e2 >= dy) {
-				if(x0 == x1) break;
+				if(x0 == x1) return;
 				err += dy;
 				x0 += sx;
 				if(!pointfunc(pen,x0,y0)) return;
 			}
 			if (e2 <= dx) {
-				if(y0 == y1) break;
+				if(y0 == y1) return;
 				err += dx;
 				y0 += sy;
 				if(!pointfunc(pen,x0,y0)) return;
@@ -244,10 +243,14 @@ loop:
 					if(delta > Math.PI) delta -= 2*Math.PI;
 					pid[4] += delta*time;
 					let derivative = (delta-pid[3])/time;
-					b.vr -= (pid[0]*delta + pid[1]*pid[4] + pid[2]*derivative)/time;
+					let dv = (pid[0]*delta + pid[1]*pid[4] + pid[2]*derivative);
+					if(dv > pid[6]){
+						dv = pid[6];
+					}else if(dv < pid[5]) dv = pid[5];
+					b.vr -= dv*time;
 					pid[3] = delta;
 				}else if(c[0] == 2){
-					// repulsor
+					// attactor/repulsor
 					let cos = Math.cos(b.rot);
 					let sin = Math.sin(b.rot);
 					let sx = c[1][0]*cos - c[1][1]*sin;
@@ -279,15 +282,25 @@ loop:
 						let delta = colldist - c[3];
 						pid[4] += delta*time;
 						let derivative = (delta-pid[3])/time;
-						let dv = (pid[0]*delta + pid[1]*pid[4] + pid[2]*derivative)/time;
+						let dv = (pid[0]*delta + pid[1]*pid[4] + pid[2]*derivative);
+						if(dv > pid[6]){
+							dv = pid[6];
+						}else if(dv < pid[5]) dv = pid[5];
 						let pushdir = norm([ex-sx, ey-sy]);
 						pid[3] = delta;
-						if(dv < 0){
-							// The controller needs to know about things beyond its set distance. But also, it can't pull.
-							b.vx += pushdir[0]*dv;
-							b.vy += pushdir[1]*dv;
-						}
+						b.vx += pushdir[0]*dv*time;
+						b.vy += pushdir[1]*dv*time;
 					}
+				}else if(c[0] == 3){
+					let v = c[2];
+					let cos = Math.cos(b.rot);
+					let sin = Math.sin(b.rot);
+					let vecx = v[0]*cos - v[1]*sin;
+					let vecy = v[0]*sin + v[1]*cos;
+					let speed = vecx*b.vx+vecy*b.vy;
+					let dv = c[1]-speed;
+					b.vx += dv*vecx;
+					b.vy += dv*vecy;
 				}
 			});
 		});
