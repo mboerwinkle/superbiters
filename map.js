@@ -167,6 +167,7 @@ class Obj{
 	}
 	clone(){
 		let ret = new Obj(this.def, this.phys.cx, this.phys.cy, this.phys.rot, this.phys.gravity);
+		ret.label = this.label;
 		ret.backref = this.backref;
 		ret.phys.vx = this.phys.vx;
 		ret.phys.vy = this.phys.vy;

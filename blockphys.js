@@ -260,14 +260,15 @@ loop:
 					let ey = c[2][0]*sin + c[2][1]*cos;
 					let cend = this.to_cgrid_coords([ex+b.cx, ey+b.cy]);
 					let ccoll = null;
+					c[5] = false;
 					this.cdrawline(idx, ...cstart, ...cend, (myidx, x, y) => {
 						if(x < 0 || y < 0 || x >= this.cgridx || y >= this.cgridy) return true;
-						let c = x+y*this.cgridx;
-						let v = this.cgrid[c];
+						let v = this.cgrid[x+y*this.cgridx];
 						if(v != 0){
 							let otheridx = (v >> 1)-1;
 							if(otheridx != myidx){
 								ccoll = [x, y];
+								c[5] = otheridx;
 								return false;
 							}
 						}
@@ -299,6 +300,11 @@ loop:
 					let vecy = v[0]*sin + v[1]*cos;
 					let speed = vecx*b.vx+vecy*b.vy;
 					let dv = c[1]-speed;
+					if(dv < c[3]*time){
+						dv = c[3]*time;
+					}else if(dv > c[4]*time){
+						dv = c[4]*time;
+					}
 					b.vx += dv*vecx;
 					b.vy += dv*vecy;
 				}
@@ -482,8 +488,9 @@ class Block{
 	}
 	add_constraint(data){
 		//May wish to reference https://pidexplained.com/how-to-tune-a-pid-controller/ for tuning instructions
-		//Rotational: [1, angle, [kp, ki, kd, 0(previous error), 0(integral accumulator)]]
-		//Repulsor: [2, [raystartx, raystarty], [rayendx, rayendy], desireddistance, [kp,ki,kd,0,0]]
+		//Rotational: [1, angle, [kp, ki, kd, 0(previous error), 0(integral accumulator), minaccel, maxaccel]]
+		//Repulsor: [2, [raystartx, raystarty], [rayendx, rayendy], desireddistance, [kp,ki,kd,0,0,minaccel,maxaccel], false(what are we repulsing against)]
+		//Directional Velocity: [3, velocity, [normvecx, normvecy], minaccel, maxaccel]
 		this.constraints.push(data);
 	}
 	swap(){

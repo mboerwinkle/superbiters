@@ -96,7 +96,7 @@ function get_map_def(name){
 }
 let cFrameMS = 2;
 // This is a local, non-revertible representation of our current controls. This is used to prevent sending redundant control information to our peers.
-let localcontrols = [false,false,false,false,false,false,false,false];
+let localcontrols = [false,false,false,false,0,0];
 class SB_Round{
 	constructor(mapdef, torigin, rstate, players){
 		this.localname = input_character_name.value;
@@ -121,8 +121,14 @@ class SB_Round{
 			this.players[p] = {
 				dead : {'rframe':1000/cFrameMS},
 				avatar : null,
-				//punch,shoot,grenade,special,left,right,up,down
-				controls : [false,false,false,false,false,false,false,false]
+				jump_hold : 0,
+				last_jump : 0,
+				// used to detect double-tap sprint
+				last_move_frame : 0,
+				last_move_dir : 1, //1 or -1
+				sprint : false,
+				//punch,shoot,grenade,special,left/right,up/down
+				controls : [false,false,false,false,0,0]
 			};
 		});
 		document.onkeyup = this.keyup.bind(this);
@@ -141,6 +147,11 @@ class SB_Round{
 			prevstate.players[k] = {
 				dead: window.structuredClone(p.dead),
 				avatar : p.avatar,
+				jump_hold : p.jump_hold,
+				last_jump : p.last_jump,
+				last_move_frame : p.last_move_frame,
+				last_move_dir : p.last_move_dir,
+				sprint : p.sprint,
 				controls : Array.from(p.controls)
 			}
 		}
@@ -188,20 +199,54 @@ class SB_Round{
 					this.map.objects.push(p.avatar[0]);
 					this.map.world.add_block(p.avatar[0].phys);
 				}
-				//punch,shoot,grenade,special,left,right,up,down
+				//punch,shoot,grenade,special,left/right,up/down
 				if(p.avatar == null) continue;
-				p.avatar[0].phys.constraints[0][1] = 0;
-				p.avatar[0].phys.constraints[3][1] = 0;
-				if(p.controls[4]){
-//					p.avatar[0].phys.constraints[0][1] = -0.1;
-					p.avatar[0].phys.constraints[3][1] = -1.5;
+				let cons = p.avatar[0].phys.constraints;
+				let on_ground = cons[1][5] || cons[2][5];
+				cons[0][1] = 0;
+				cons[3][1] = 0;
+				cons[3][3] = (on_ground) ? -6 : -1;
+				cons[3][4] = (on_ground) ? 6 : 1;
+				let mdir = p.controls[4];
+				if(mdir != 0){
+					if(p.last_move_frame + 1 < this.state.frame && this.state.frame - p.last_move_frame < 300/cFrameMS && p.last_move_dir == mdir){
+						// we were not moving last frame, but we moved recently in this direction
+						p.sprint = true;
+					}
+					p.last_move_frame = this.state.frame;
+					p.last_move_dir = mdir;
+					if(p.sprint){
+						cons[3][1] = mdir * 3.5;
+						// lean when sprinting
+						cons[0][1] = mdir * 0.2;
+					}else{
+						cons[3][1] = mdir * 1.5;
+					}
+					if(mdir < 0){
+						cons[3][4] = 0; // we won't decelerate when moving, even if going faster than intended
+					}else{
+						cons[3][3] = 0;
+					}
+				}else{
+					p.sprint = false;
 				}
-				if(p.controls[5]){
-//					p.avatar[0].phys.constraints[0][1] = 0.1;
-					p.avatar[0].phys.constraints[3][1] = 1.5;
-				}
-				if(p.controls[6]){
-					p.avatar[0].phys.vy -= 0.2;
+				if(p.controls[5] == -1){
+					if(p.jump_hold < 1){
+						if(p.jump_hold == 0){
+							// was our last jump long enough ago? and are we touching the ground?
+							if((this.state.frame - p.last_jump) > 500/cFrameMS && on_ground){
+								// instant jump is already somewhat powerful
+								p.last_jump = this.state.frame;
+								p.avatar[0].phys.vy -= 4;
+								p.jump_hold += cFrameMS/250; // full jump key hold time milliseconds
+							}
+						}else{
+							p.avatar[0].phys.vy -= 4 * (cFrameMS/250);
+							p.jump_hold += cFrameMS/250; // full jump key hold time milliseconds
+						}
+					}
+				}else{
+					p.jump_hold = 0;
 				}
 			}
 			this.map.world.step(cFrameMS/1000);
@@ -219,9 +264,9 @@ class SB_Round{
 		let ava = new Obj(object_definitions['player_body'], x, y, 0);
 		ava.label = name;
 		ava.phys.add_constraint([1, 0, [15, 0, 10, 0, 0, -10, 10]]);
-		ava.phys.add_constraint([2, [0.28,0], [0.28,1.5], 1, [80, 0, 15, 0, 0, -20, 0]]);
-		ava.phys.add_constraint([2, [-0.28,0], [-0.28,1.5], 1, [80, 0, 15, 0, 0, -20, 0]]);
-		ava.phys.add_constraint([3, 0, [1, 0]]);
+		ava.phys.add_constraint([2, [0.28,0], [0.28,1.5], 1, [80, 0, 15, 0, 0, -20, 0], false]);
+		ava.phys.add_constraint([2, [-0.28,0], [-0.28,1.5], 1, [80, 0, 15, 0, 0, -20, 0], false]);
+		ava.phys.add_constraint([3, 0, [1, 0], -6, 6]);
 		let ret = [ava];
 		ava.add_backref(ret);
 		return ret;
@@ -253,9 +298,29 @@ class SB_Round{
 		//punch,shoot,grenade,special,left,right,up,down
 		let idx = ({86:0, 67:1, 88:2, 90:3, 37:4, 39:5, 38:6,32:6, 40:7})[kc];
 		if(idx !== undefined){
+			if(idx >= 4){
+				let dv = 1;
+				if(idx == 4){
+					dv = -1;
+				}else if(idx == 5){
+					dv = 1;
+					idx = 4;
+				}else if(idx == 6){
+					dv = -1;
+					idx = 5;
+				}else{
+					dv = 1;
+					idx = 5;
+				}
+				if(!v){ // this is a release event
+					if(localcontrols[idx] == -dv) return;//we more recently pressed the other direction, and this is a release event
+					dv = 0;
+				}
+				v = dv;
+			}
 			if(localcontrols[idx] != v){ 
-				localcontrols[idx] = v;
 				let frame = Math.trunc((clock.now()-this.torigin)/cFrameMS);
+				localcontrols[idx] = v;
 				this.applyInput(this.localname, frame, idx, v);
 //				(new Promise(r => setTimeout(r, 750))).then((f) => { // simulate latency by delaying informing my peers
 				if(rtcgroup != null) rtcgroup.broadcast({"input":{"name":this.localname, "frame":frame, "c":idx, "v":v}});
