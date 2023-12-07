@@ -13,6 +13,7 @@ let importmapbutton = document.getElementById("importmapbutton");
 let runbutton = document.getElementById("runbutton");
 let stopbutton = document.getElementById("stopbutton");
 let mapnameinput = document.getElementById("mapnameinput");
+let input_map_script = document.getElementById('input_map_script');
 let running = false;
 function runsim(run){
 	if(run && !running){
@@ -67,8 +68,12 @@ tool_add_object.onchange = function(){
 tool_add_rotation.oninput = function(){
 	rotation_display.innerText = tool_add_rotation.value.padStart(3, ' ');
 }
+input_map_script.onchange = function(){
+	map.script = input_map_script.value;
+}
 function reeval_enabled(){
 	mapnameinput.value = map.name;
+	if(map.script != null) input_map_script.value = map.script;
 	tool_mode_add.disabled = true;
 	tool_mode_delete.disabled = true;
 	tool_add_object.disabled = true;

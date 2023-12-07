@@ -155,6 +155,7 @@ class SB_Round{
 				controls : Array.from(p.controls)
 			}
 		}
+		prevstate.scriptstorage = window.structuredClone(this.map.scriptstorage);
 		this.statearrayidx = newidx;
 	}
 	rand(){
@@ -205,8 +206,8 @@ class SB_Round{
 				let on_ground = cons[1][5] || cons[2][5];
 				cons[0][1] = 0;
 				cons[3][1] = 0;
-				cons[3][3] = (on_ground) ? -6 : -1;
-				cons[3][4] = (on_ground) ? 6 : 1;
+				cons[3][3] = (on_ground) ? -6 : -3;
+				cons[3][4] = (on_ground) ? 6 : 3;
 				let mdir = p.controls[4];
 				if(mdir != 0){
 					if(p.last_move_frame + 1 < this.state.frame && this.state.frame - p.last_move_frame < 300/cFrameMS && p.last_move_dir == mdir){
@@ -255,7 +256,7 @@ class SB_Round{
 		}
 		this.map.draw(ctx);
 		ctx.resetTransform();
-		if(this.map.foreground != null){
+		if(this.map.def.foreground != null){
 			ctx.drawImage(this.map.def.foreground, 0,0, 800,400);
 		}
 		if(this.running) window.requestAnimationFrame(this.drawframe.bind(this));
@@ -283,6 +284,8 @@ class SB_Round{
 			this.state.objects = null;
 			this.players = this.state.players;
 			this.state.players = null;
+			this.map.scriptstorage = this.state.scriptstorage;
+			this.state.scriptstorage = null;
 			this.map.world.blocks = this.map.objects.map((o) => o.phys);
 			this.map.objects.forEach((o) => o.enforce_backrefs());
 		}

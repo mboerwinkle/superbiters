@@ -11,6 +11,7 @@ class MapDefinition{
 		this.inplane = null;
 		this.background = null;
 		this.farbackground = null;
+		this.script = null;
 	}
 	place_object(name, x, y, r){
 		this.objects.push([name, x, y, r]);
@@ -93,10 +94,12 @@ class MapDefinition{
 		if(this.farbackground != null){
 			arch.add_item('FBGD.PNG', this.farbackground);
 		}
-		arch.add_item('DEF.JSON', {
+		let defjson = {
 			"name":this.name,
 			"objects":this.objects
-		});
+		};
+		if(this.script != null) defjson['script'] = this.script;
+		arch.add_item('DEF.JSON', defjson);
 		return await marchive_compress(arch);
 	}
 }
@@ -127,6 +130,7 @@ async function import_map_definition(f){
 	let def = arch['DEF.JSON'];
 	ret.name = def['name'];
 	ret.objects = def['objects'];
+	if('script' in def) ret.script = def['script'];
 	return ret;
 }
 class ObjectDefinition{
@@ -200,6 +204,11 @@ class Obj{
 		}
 	}
 }
+function parse_script(s){
+	for(let idx = 0; idx < s.length; idx++){
+		let c = s[idx];
+	}
+}
 class Map{
 	constructor(definition){
 		this.def = definition;
@@ -212,6 +221,7 @@ class Map{
 		this.itemspawns = [];
 		this.flagspawns = [[],[]];
 		this.objects = [];
+		this.scriptstorage = {};
 		this.def.objects.forEach((o) => {
 			if(o[0][0] == '$'){
 				if(o[0] == '$RedPlayerSpawn$'){
@@ -230,6 +240,11 @@ class Map{
 			}
 		});
 		this.objects.forEach((o) => this.world.add_block(o.phys));
+		if(this.def.script != null){
+			this.run_script(parse_script(this.def.script));
+		}
+	}
+	run_script(s){
 	}
 	draw(ctx){
 		this.objects.forEach((o) => o.draw(ctx));

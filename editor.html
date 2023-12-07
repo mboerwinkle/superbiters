@@ -53,7 +53,31 @@
 <input type="button" value="Export" id="exportmapbutton" onclick="export_map()" disabled>
 </div>
 </form>
+<div>
 <canvas id="gamecanvas" width=800 height=400 style="image-rendering:crisp-edges;image-rendering:pixelated;"></canvas>
+</div>
+<div>
+<textarea syntax_highlight="comment:';.*$';match_groupers;keywords:'_save|_load|_interval|_timer|_display|_end_round|begin|if|ge|gt|le|lt|eq|true|false|null|[+-*]|//';keywordchars:'[a-zA-Z0-9_-]';" rows=20 cols=80 id=input_map_script autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" wrap="off" style="font-family:monospace;">
+; This is the script-edit pane. You can write a script that is executed when the map is loaded.
+; Comments begin with a semicolon. Feel free to delete everything and start over from scratch.
+; If you want to have something happen sometime later in the round, you'll have to register it using functions such as _interval, _timer, or _death.
+; Functions that begin with an underscore are builtin functions that are not standard scheme.
+
+;; Example script to limit how long a round can last.
+;; Initial timer state
+;(_save "elapsed_sec" 0)
+;; Recurring task
+;(_interval 1000 '(begin
+; ; Update the timer
+; (_save "elapsed_sec" (+ (_load "elapsed_sec") 1))
+; ; Display the time on screen
+; (_display "#000" 25 1 2 (_load "elapsed_sec"))
+; ; End the round if the time limit is reached
+; (if (ge (_load "elapsed_sec") 300) '(_end_round))
+;))
+</textarea>
+</div>
+<script src="/syntax_highlight/syntax_highlight.js"></script>
 <script src="marchive.js"></script>
 <script src="blockphys.js"></script>
 <script src="map.js"></script>
