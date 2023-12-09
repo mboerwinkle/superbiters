@@ -149,7 +149,7 @@ class World{
 		let lastp = this.to_cgrid_coords(pts[pts.length-1]);
 		for(let pidx = 0; pidx < pts.length; pidx++){
 			let p = this.to_cgrid_coords(pts[pidx]);
-			this.cdrawline(pen, p[0], p[1], lastp[0], lastp[1], pointfunc);
+			if(!this.cdrawline(pen, p[0], p[1], lastp[0], lastp[1], pointfunc)) return;
 			lastp = p;
 		}
 	}
@@ -159,26 +159,25 @@ class World{
 		let sx = (x0 < x1) ? 1 : -1;
 		let sy = (y0 < y1) ? 1 : -1;
 		let err = dx + dy;
-		if(!pointfunc(pen,x0,y0)) return;
+		if(!pointfunc(pen,x0,y0)) return false;
 		while (true) {
 			if (x0 == x1 && y0 == y1) {
-				return;
+				return true;
 			}
         		let e2 = 2 * err;
 			if (e2 >= dy) {
-				if(x0 == x1) return;
+				if(x0 == x1) return true;
 				err += dy;
 				x0 += sx;
-				if(!pointfunc(pen,x0,y0)) return;
+				if(!pointfunc(pen,x0,y0)) return false;
 			}
 			if (e2 <= dx) {
-				if(y0 == y1) return;
+				if(y0 == y1) return true;
 				err += dx;
 				y0 += sy;
-				if(!pointfunc(pen,x0,y0)) return;
+				if(!pointfunc(pen,x0,y0)) return false;
 			}
 		}
-		pointfunc(pen, x0, y0);
 	}
 	cdrawpoint(pen, x,y){
 		if(x < 0 || y < 0 || x >= this.cgridx || y >= this.cgridy) return true;
