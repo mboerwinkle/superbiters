@@ -194,11 +194,26 @@ class SB_Round{
 			for(let pname in this.players){
 				let p = this.players[pname];
 				if(p.dead && p.dead.rframe == this.state.frame){
-					p.dead = false;
-					p.avatar = this.create_avatar(...(this.map.playerspawns[this.rand()%2][this.rand()%3]), pname);
-					// Add the avatar's physics body as a map object
-					this.map.objects.push(p.avatar[0]);
-					this.map.world.add_block(p.avatar[0].phys);
+					let avatar = this.create_avatar(0, 0, pname);
+					let spawn_opts = this.map.playerspawns[0].concat(this.map.playerspawns[1]);
+					// `concat` makes a new copy, but eventually we'll pick one by team, so shallow-copy here
+					spawn_opts = spawn_opts.slice();
+					console.log(spawn_opts.length + " spawn options found");
+					while (spawn_opts.length) {
+						// Grab element at random position and remove
+						let loc = spawn_opts.splice(this.rand() % spawn_opts.length, 1)[0];
+						avatar[0].phys.cx = loc[0];
+						avatar[0].phys.cy = loc[1];
+						if (this.map.world.add_block(avatar[0].phys)) {
+							// Success, we found a home!
+							p.dead = false;
+							p.avatar = avatar;
+							this.map.objects.push(avatar[0]);
+							break;
+						}
+					}
+					// If we fall out of the loop, uhhhhh
+					// I guess we just don't spawn??
 				}
 				//punch,shoot,grenade,special,left/right,up/down
 				if(p.avatar == null) continue;
