@@ -97,23 +97,59 @@ class World{
 		this.cgridsize = cgridsize;
 		this.cgridx = width/cgridsize+1;
 		this.cgridy = height/cgridsize+1;
-		this.cgrid = [];
 		this.collisions = [];
 		this.blocks = [];
 		this.fixedpoints = [];
+
+		this.refresh_cgrid();
+	}
+	refresh_cgrid() {
+		let cgridbuf = new ArrayBuffer(this.cgridx*this.cgridy);
+		this.cgrid = new Uint8Array(cgridbuf);
+		// If we kept an ArrayBuffer with just the fixedpoints marked,
+		// we could just clone it to refresh the cgrid,
+		// but IDK how copying memory in bulk compares to a little iteration.
+		this.fixedpoints.forEach((p) => this.cgrid[p] = 1);
 	}
 	add_block(block){
-		this.blocks.push(block);
 		block.cgridsize = this.cgridsize;
+
+		let idx = this.blocks.length;
+		let pen = idx*2 + 2;
+		let fail = false;
+
+		let drawfunc = (out, x, y) => {
+			if(x < 0 || y < 0 || x >= this.cgridx || y >= this.cgridy) return true;
+			let c = x+y*this.cgridx;
+			if (this.cgrid[c] != 0 && this.cgrid[c] != pen) {
+				fail = true;
+				return false;
+			}
+			this.cgrid[c] = out;
+			return true;
+		}
+
+		let pts = block.points();
+		// We're going to give it a shot, but if it fails that's okay
+		this.cdrawpoly(pen, pts, drawfunc);
+		if (fail) {
+			// If we failed at some point, un-draw all the stuff we put in.
+			// We expect this to happen fairly rarely.
+			this.cdrawpoly(0, pts, drawfunc);
+			return false;
+		}
+
+		this.blocks.push(block);
+		return true;
 	}
 	to_cgrid_coords(pt){
 		return [Math.trunc(pt[0]/this.cgridsize), Math.trunc(pt[1]/this.cgridsize)];
 	}
-	cdrawpoly(pen, pts){
+	cdrawpoly(pen, pts, pointfunc = this.cdrawpoint.bind(this)){
 		let lastp = this.to_cgrid_coords(pts[pts.length-1]);
 		for(let pidx = 0; pidx < pts.length; pidx++){
 			let p = this.to_cgrid_coords(pts[pidx]);
-			this.cdrawline(pen, p[0], p[1], lastp[0], lastp[1]);
+			if(!this.cdrawline(pen, p[0], p[1], lastp[0], lastp[1], pointfunc)) return;
 			lastp = p;
 		}
 	}
@@ -123,26 +159,25 @@ class World{
 		let sx = (x0 < x1) ? 1 : -1;
 		let sy = (y0 < y1) ? 1 : -1;
 		let err = dx + dy;
-		if(!pointfunc(pen,x0,y0)) return;
+		if(!pointfunc(pen,x0,y0)) return false;
 		while (true) {
 			if (x0 == x1 && y0 == y1) {
-				return;
+				return true;
 			}
         		let e2 = 2 * err;
 			if (e2 >= dy) {
-				if(x0 == x1) return;
+				if(x0 == x1) return true;
 				err += dy;
 				x0 += sx;
-				if(!pointfunc(pen,x0,y0)) return;
+				if(!pointfunc(pen,x0,y0)) return false;
 			}
 			if (e2 <= dx) {
-				if(y0 == y1) return;
+				if(y0 == y1) return true;
 				err += dx;
 				y0 += sy;
-				if(!pointfunc(pen,x0,y0)) return;
+				if(!pointfunc(pen,x0,y0)) return false;
 			}
 		}
-		pointfunc(pen, x0, y0);
 	}
 	cdrawpoint(pen, x,y){
 		if(x < 0 || y < 0 || x >= this.cgridx || y >= this.cgridy) return true;
@@ -204,9 +239,7 @@ class World{
 		return true;
 	}
 	step(time){
-		let cgridbuf = new ArrayBuffer(this.cgridx*this.cgridy);
-		this.cgrid = new Uint8Array(cgridbuf);
-		this.fixedpoints.forEach((p) => this.cgrid[p] = 1);
+		this.refresh_cgrid();
 		this.collisions = {};
 		this.blocks.forEach((b, idx) => {
 			b.step(time);
