@@ -126,6 +126,7 @@ class SB_Round{
 				// used to detect double-tap sprint
 				last_move_frame : 0,
 				last_move_dir : 1, //1 or -1
+				last_action : 0, // 0-3 for punch - special, to avoid repeats
 				sprint : false,
 				//punch,shoot,grenade,special,left/right,up/down
 				controls : [false,false,false,false,0,0]
@@ -161,6 +162,13 @@ class SB_Round{
 	rand(){
 		this.state.rstate = xorshift32(this.state.rstate);
 		return Math.abs(this.state.rstate);
+	}
+	add_map_object(o) {
+		if (this.map.world.add_block(o.phys)) {
+			this.map.objects.push(o);
+			return true;
+		}
+		return false;
 	}
 	drawframe(){
 		let tframe = Math.trunc((clock.now()-this.torigin)/cFrameMS);
@@ -204,11 +212,10 @@ class SB_Round{
 						let loc = spawn_opts.splice(this.rand() % spawn_opts.length, 1)[0];
 						avatar[0].phys.cx = loc[0];
 						avatar[0].phys.cy = loc[1];
-						if (this.map.world.add_block(avatar[0].phys)) {
+						if (this.add_map_object(avatar[0])) {
 							// Success, we found a home!
 							p.dead = false;
 							p.avatar = avatar;
-							this.map.objects.push(avatar[0]);
 							break;
 						}
 					}
@@ -264,6 +271,29 @@ class SB_Round{
 				}else{
 					p.jump_hold = 0;
 				}
+				// handle grenade
+				if (p.controls[2]) {
+					// If we already processed a grenade, for now we just say
+					// there's nothing more to do for this player.
+					if (p.last_action == 2) continue;
+					p.last_action = 2;
+					let phys = p.avatar[0].phys;
+					// TODO this trig nonsense should be in a method somewhere
+					let r = phys.rot;
+					// quarter turn for cos & sin
+					let cos = Math.sin(r);
+					let sin = -Math.cos(r);
+					let d = 1.3 * phys.height;
+					let grenade = this.create_bowling_pin(phys.cx + d*cos, phys.cy  + d*sin, phys.rot);
+					this.add_map_object(grenade[0]);
+					let g_p = grenade[0].phys;
+					g_p.vx = phys.vx + cos*10;
+					g_p.vy = phys.vy + sin*10;
+				} else {
+					// TODO this would be at the end of an if/else chain of other controls.
+					//      `last_action` may be replaced w/ a better sol'n, but it's good enough for now.
+					p.last_action = 0;
+				}
 			}
 			this.map.world.step(cFrameMS/1000);
 			this.map.world.swap();
@@ -285,6 +315,13 @@ class SB_Round{
 		ava.phys.add_constraint([3, 0, [1, 0], -6, 6]);
 		let ret = [ava];
 		ava.add_backref(ret);
+		return ret;
+	}
+	create_bowling_pin(x, y, r) {
+		let obj = new Obj(object_definitions['bowling_pin'], x, y, r);
+		// TODO I have no idea if this is necessary for non-player objects
+		let ret = [obj];
+		obj.add_backref(ret);
 		return ret;
 	}
 	applyInput(name, frame, control, value){
@@ -314,6 +351,7 @@ class SB_Round{
 	}
 	keychg(kc, v){
 		//punch,shoot,grenade,special,left,right,up,down
+		//  V     C      X       Z
 		let idx = ({86:0, 67:1, 88:2, 90:3, 37:4, 39:5, 38:6,32:6, 40:7})[kc];
 		if(idx !== undefined){
 			if(idx >= 4){
